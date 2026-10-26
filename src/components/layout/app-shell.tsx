@@ -21,34 +21,26 @@ function AiBackgroundOrbs() {
 export function AppShell({
   children,
   isDemo,
+  user,
 }: {
   children: React.ReactNode;
   isDemo: boolean;
+  user: { email: string; fullName: string | null; avatarUrl: string | null };
 }) {
   const pathname = usePathname();
   const assistant = pathname === "/" || pathname === "/assistant";
 
   return (
-    <div
-      className={cn(
-        "ai-shell flex min-h-dvh",
-        assistant && "h-dvh max-h-dvh overflow-hidden"
-      )}
-    >
+    <div className="ai-shell flex h-dvh max-h-dvh overflow-hidden">
       <AiBackgroundOrbs />
-      <Sidebar isDemo={isDemo} />
-      <div
-        className={cn(
-          "relative z-0 flex min-h-0 min-w-0 flex-1 flex-col",
-          assistant ? "overflow-hidden" : "min-h-0"
-        )}
-      >
+      <Sidebar isDemo={isDemo} user={user} />
+      <div className="relative z-0 flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
         <main
           className={cn(
             "flex min-h-0 min-w-0 flex-1 flex-col",
             assistant
               ? "overflow-hidden pt-14 md:pt-0"
-              : "overflow-x-hidden overflow-y-auto px-3 pb-10 pt-16 sm:px-4 md:px-8 md:pt-8"
+              : "overflow-x-hidden overflow-y-auto overscroll-contain px-3 pb-10 pt-16 sm:px-4 md:px-8 md:pt-8"
           )}
         >
           {assistant ? (

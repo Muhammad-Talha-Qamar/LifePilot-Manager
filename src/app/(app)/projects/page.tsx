@@ -1,11 +1,20 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Loader2 } from "lucide-react";
+import { Loader2, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { api } from "@/lib/client-api";
+import { notifyDataChanged } from "@/lib/data-events";
 import { useDataRefresh } from "@/lib/use-data-refresh";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import type { Project } from "@/types";
 
 type ProjectRow = Project & {
@@ -16,6 +25,7 @@ type ProjectRow = Project & {
 export default function ProjectsPage() {
   const [projects, setProjects] = useState<ProjectRow[]>([]);
   const [loading, setLoading] = useState(true);
+  const [confirmId, setConfirmId] = useState<string | null>(null);
 
   async function load() {
     try {
@@ -35,6 +45,18 @@ export default function ProjectsPage() {
   useEffect(() => {
     void load();
   }, []);
+
+  async function remove(id: string) {
+    try {
+      await api(`/api/projects/${id}`, { method: "DELETE" });
+      toast.success("Project deleted");
+      notifyDataChanged();
+      setConfirmId(null);
+      await load();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Delete failed");
+    }
+  }
 
   return (
     <div className="mx-auto max-w-3xl space-y-5">
@@ -62,8 +84,21 @@ export default function ProjectsPage() {
               style={{ animationDelay: `${Math.min(index, 8) * 45}ms` }}
             >
               <div className="flex items-start justify-between gap-3">
-                <h2 className="text-base font-semibold tracking-tight">{p.name}</h2>
-                <Badge variant="secondary">{p.priority}</Badge>
+                <h2 className="min-w-0 flex-1 break-words text-base font-semibold tracking-tight">
+                  {p.name}
+                </h2>
+                <div className="flex shrink-0 items-center gap-1">
+                  <Badge variant="secondary">{p.priority}</Badge>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-9 w-9 text-foreground/70 hover:text-foreground"
+                    aria-label={`Delete ${p.name}`}
+                    onClick={() => setConfirmId(p.id)}
+                  >
+                    <Trash2 className="h-4 w-4" />
+                  </Button>
+                </div>
               </div>
               <p className="mt-2 text-sm text-muted-foreground">
                 {p.description || "No description"}
@@ -87,6 +122,26 @@ export default function ProjectsPage() {
           ))}
         </div>
       )}
+
+      <Dialog open={Boolean(confirmId)} onOpenChange={(o) => !o && setConfirmId(null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Delete this project?</DialogTitle>
+          </DialogHeader>
+          <p className="text-sm text-muted-foreground">This cannot be undone.</p>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setConfirmId(null)}>
+              Cancel
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={() => confirmId && void remove(confirmId)}
+            >
+              Delete
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

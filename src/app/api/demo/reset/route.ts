@@ -1,8 +1,9 @@
 import { isDemoMode } from "@/lib/config";
 import { jsonError, jsonOk } from "@/lib/api";
-import { resetDemoStore } from "@/lib/demo/store";
+import { requireAuth } from "@/lib/data/auth";
+import { clearDemoStore, loadSampleDemoStore } from "@/lib/demo/store";
 
-export async function POST() {
+export async function POST(request: Request) {
   try {
     if (!isDemoMode()) {
       return jsonError(
@@ -10,11 +11,28 @@ export async function POST() {
         400
       );
     }
-    const store = await resetDemoStore();
+
+    const ctx = await requireAuth();
+    const body = (await request.json().catch(() => ({}))) as {
+      sample?: boolean;
+    };
+
+    const store = body.sample
+      ? await loadSampleDemoStore(
+          ctx.userId,
+          ctx.email,
+          ctx.profile.full_name
+        )
+      : await clearDemoStore(ctx.userId, ctx.email, ctx.profile.full_name);
+
     return jsonOk({
       reset: true,
-      message: "Demo data restored to seed state. Changes were never saved to Supabase.",
+      sample: Boolean(body.sample),
+      message: body.sample
+        ? "Sample tasks and checklists loaded for exploration."
+        : "Your board is empty again.",
       taskCount: store.tasks.length,
+      checklistCount: store.checklists.length,
     });
   } catch (e) {
     return jsonError(e);

@@ -1,58 +1,153 @@
 import { promises as fs } from "fs";
 import path from "path";
-import { createSeedStore, type DemoStore } from "./seed";
+import { createEmptyStore, createSeedStore, type DemoStore } from "./seed";
 
-const STORE_PATH = path.join(process.cwd(), ".demo-data.json");
+const DATA_DIR = path.join(process.cwd(), ".demo-data");
 
-let memoryStore: DemoStore | null = null;
-let writeQueue: Promise<void> = Promise.resolve();
+type GlobalStore = {
+  memoryByUser: Map<string, DemoStore>;
+  writeQueue: Promise<void>;
+};
 
-async function readFromDisk(): Promise<DemoStore | null> {
+function globals(): GlobalStore {
+  const g = globalThis as typeof globalThis & { __lpDemoStore?: GlobalStore };
+  if (!g.__lpDemoStore) {
+    g.__lpDemoStore = {
+      memoryByUser: new Map(),
+      writeQueue: Promise.resolve(),
+    };
+  }
+  return g.__lpDemoStore;
+}
+
+function storePath(userId: string): string {
+  const safe = userId.replace(/[^a-zA-Z0-9_-]/g, "_");
+  return path.join(DATA_DIR, `${safe}.json`);
+}
+
+async function ensureDir(): Promise<void> {
+  await fs.mkdir(DATA_DIR, { recursive: true });
+}
+
+async function readFromDisk(userId: string): Promise<DemoStore | null> {
   try {
-    const raw = await fs.readFile(STORE_PATH, "utf8");
+    const raw = await fs.readFile(storePath(userId), "utf8");
     return JSON.parse(raw) as DemoStore;
   } catch {
     return null;
   }
 }
 
-async function writeToDisk(store: DemoStore): Promise<void> {
-  writeQueue = writeQueue.then(async () => {
-    await fs.writeFile(STORE_PATH, JSON.stringify(store, null, 2), "utf8");
+async function writeToDisk(userId: string, store: DemoStore): Promise<void> {
+  const g = globals();
+  g.writeQueue = g.writeQueue.then(async () => {
+    await ensureDir();
+    await fs.writeFile(storePath(userId), JSON.stringify(store, null, 2), "utf8");
   });
-  await writeQueue;
+  await g.writeQueue;
 }
 
-export async function getDemoStore(): Promise<DemoStore> {
-  if (memoryStore) return memoryStore;
-  const disk = await readFromDisk();
+export async function getDemoStore(
+  userId: string,
+  profile?: { email: string; fullName?: string | null }
+): Promise<DemoStore> {
+  const g = globals();
+  // Prefer disk so HMR / split module instances stay consistent.
+  const disk = await readFromDisk(userId);
   if (disk) {
-    memoryStore = disk;
+    g.memoryByUser.set(userId, disk);
     return disk;
   }
-  memoryStore = createSeedStore();
-  await writeToDisk(memoryStore);
-  return memoryStore;
+
+  const cached = g.memoryByUser.get(userId);
+  if (cached) return cached;
+
+  const store = createEmptyStore(
+    userId,
+    profile?.email ?? `${userId}@lifepilot.local`,
+    profile?.fullName ?? null
+  );
+  g.memoryByUser.set(userId, store);
+  await writeToDisk(userId, store);
+  return store;
 }
 
-export async function saveDemoStore(store: DemoStore): Promise<void> {
-  memoryStore = store;
-  await writeToDisk(store);
+export async function ensureEmptyDemoStore(
+  userId: string,
+  email: string,
+  fullName: string | null
+): Promise<DemoStore> {
+  const g = globals();
+  const existing = await readFromDisk(userId);
+  if (existing) {
+    g.memoryByUser.set(userId, existing);
+    return existing;
+  }
+  const store = createEmptyStore(userId, email, fullName);
+  g.memoryByUser.set(userId, store);
+  await writeToDisk(userId, store);
+  return store;
+}
+
+export async function saveDemoStore(userId: string, store: DemoStore): Promise<void> {
+  globals().memoryByUser.set(userId, store);
+  await writeToDisk(userId, store);
 }
 
 export async function mutateDemoStore(
+  userId: string,
   mutator: (store: DemoStore) => void | Promise<void>
 ): Promise<DemoStore> {
-  const store = await getDemoStore();
-  // Deep clone to avoid accidental shared mutation bugs
+  const store = await getDemoStore(userId);
   const clone = structuredClone(store) as DemoStore;
   await mutator(clone);
-  await saveDemoStore(clone);
+  await saveDemoStore(userId, clone);
   return clone;
 }
 
-export async function resetDemoStore(): Promise<DemoStore> {
-  memoryStore = createSeedStore();
-  await writeToDisk(memoryStore);
-  return memoryStore;
+/** Wipe the signed-in user's board back to empty (not sample seed). */
+export async function clearDemoStore(
+  userId: string,
+  email: string,
+  fullName: string | null
+): Promise<DemoStore> {
+  const previous = await readFromDisk(userId);
+  const store = createEmptyStore(userId, email, fullName);
+  if (previous?.profile.avatar_url) {
+    store.profile.avatar_url = previous.profile.avatar_url;
+  }
+  if (previous?.profile.created_at) {
+    store.profile.created_at = previous.profile.created_at;
+  }
+  globals().memoryByUser.set(userId, store);
+  await writeToDisk(userId, store);
+  return store;
+}
+
+/** Optional: load the sample board for exploration. */
+export async function loadSampleDemoStore(
+  userId: string,
+  email: string,
+  fullName: string | null
+): Promise<DemoStore> {
+  const previous = await readFromDisk(userId);
+  const store = createSeedStore(userId, email, fullName);
+  if (previous?.profile.avatar_url) {
+    store.profile.avatar_url = previous.profile.avatar_url;
+  }
+  if (previous?.profile.created_at) {
+    store.profile.created_at = previous.profile.created_at;
+  }
+  globals().memoryByUser.set(userId, store);
+  await writeToDisk(userId, store);
+  return store;
+}
+
+/** @deprecated use clearDemoStore — kept for older callers */
+export async function resetDemoStore(
+  userId: string,
+  email: string,
+  fullName: string | null
+): Promise<DemoStore> {
+  return clearDemoStore(userId, email, fullName);
 }

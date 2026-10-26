@@ -1,6 +1,12 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useState,
+  type ReactNode,
+} from "react";
 import {
   addDays,
   addMonths,
@@ -21,25 +27,71 @@ import { useDataRefresh } from "@/lib/use-data-refresh";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
-import type { CalendarEvent, Task } from "@/types";
+import type {
+  CalendarEvent,
+  Checklist,
+  ChecklistItem,
+  Project,
+  Task,
+} from "@/types";
+
+type ChecklistRow = Checklist & {
+  items: ChecklistItem[];
+};
+
+type DatedChecklistItem = ChecklistItem & {
+  checklist_title: string;
+};
+
+function dayKey(value: string | null | undefined): string | null {
+  if (!value) return null;
+  const key = value.slice(0, 10);
+  return /^\d{4}-\d{2}-\d{2}$/.test(key) ? key : null;
+}
 
 export default function CalendarPage() {
   const [events, setEvents] = useState<CalendarEvent[]>([]);
   const [tasks, setTasks] = useState<Task[]>([]);
+  const [projects, setProjects] = useState<Project[]>([]);
+  const [checklistItems, setChecklistItems] = useState<DatedChecklistItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [cursor, setCursor] = useState(() => startOfMonth(new Date()));
   const [selected, setSelected] = useState(() => new Date());
 
-  async function load() {
+  const load = useCallback(async () => {
     try {
-      const [ev, ts] = await Promise.all([
+      const [ev, ts, ps, cls] = await Promise.all([
         api<CalendarEvent[]>("/api/events"),
         api<Task[]>("/api/tasks"),
+        api<Project[]>("/api/projects"),
+        api<ChecklistRow[]>("/api/checklists"),
       ]);
       setEvents(ev);
       setTasks(
         ts.filter(
-          (t) => t.due_date && t.status !== "done" && t.status !== "cancelled"
+          (t) =>
+            dayKey(t.due_date) &&
+            t.status !== "done" &&
+            t.status !== "cancelled"
+        )
+      );
+      setProjects(
+        ps.filter(
+          (p) =>
+            dayKey(p.deadline) &&
+            !p.is_archived &&
+            p.status !== "completed" &&
+            p.status !== "archived"
+        )
+      );
+      setChecklistItems(
+        cls.flatMap((cl) =>
+          cl.items
+            .filter((item) => dayKey(item.due_date) && !item.is_completed)
+            .map((item) => ({
+              ...item,
+              checklist_title: cl.title,
+            }))
         )
       );
     } catch (e) {
@@ -47,15 +99,13 @@ export default function CalendarPage() {
     } finally {
       setLoading(false);
     }
-  }
+  }, []);
 
-  useDataRefresh(() => {
-    void load();
-  });
+  useDataRefresh(load);
 
   useEffect(() => {
     void load();
-  }, []);
+  }, [load]);
 
   const days = useMemo(() => {
     const start = startOfWeek(startOfMonth(cursor), { weekStartsOn: 1 });
@@ -65,24 +115,36 @@ export default function CalendarPage() {
 
   const selectedKey = format(selected, "yyyy-MM-dd");
 
-  const dayEvents = events.filter((e) =>
-    isSameDay(new Date(e.start_at), selected)
+  const dayEvents = events.filter((e) => dayKey(e.start_at) === selectedKey);
+  const dayTasks = tasks.filter((t) => dayKey(t.due_date) === selectedKey);
+  const dayProjects = projects.filter((p) => dayKey(p.deadline) === selectedKey);
+  const dayChecklistItems = checklistItems.filter(
+    (item) => dayKey(item.due_date) === selectedKey
   );
-  const dayTasks = tasks.filter((t) => t.due_date === selectedKey);
 
   function markersFor(day: Date) {
     const key = format(day, "yyyy-MM-dd");
-    const hasEvent = events.some((e) => isSameDay(new Date(e.start_at), day));
-    const hasTask = tasks.some((t) => t.due_date === key);
-    return { hasEvent, hasTask };
+    return {
+      hasEvent: events.some((e) => dayKey(e.start_at) === key),
+      hasTask: tasks.some((t) => dayKey(t.due_date) === key),
+      hasProject: projects.some((p) => dayKey(p.deadline) === key),
+      hasChecklist: checklistItems.some((item) => dayKey(item.due_date) === key),
+    };
   }
+
+  const dayEmpty =
+    dayEvents.length === 0 &&
+    dayTasks.length === 0 &&
+    dayProjects.length === 0 &&
+    dayChecklistItems.length === 0;
 
   return (
     <div className="mx-auto w-full min-w-0 max-w-4xl space-y-4 sm:space-y-5">
       <header className="animate-fade-up">
         <h1 className="page-title">Calendar</h1>
         <p className="mt-1 text-sm text-muted-foreground">
-          Browse dates, then review events and due tasks for the day.
+          Browse dates, then review events, tasks, projects, and checklists for
+          the day.
         </p>
       </header>
 
@@ -147,7 +209,8 @@ export default function CalendarPage() {
 
             <div className="grid w-full min-w-0 grid-cols-7 gap-0.5 sm:gap-1">
               {days.map((day) => {
-                const { hasEvent, hasTask } = markersFor(day);
+                const { hasEvent, hasTask, hasProject, hasChecklist } =
+                  markersFor(day);
                 const inMonth = isSameMonth(day, cursor);
                 const isSelected = isSameDay(day, selected);
                 const isToday = isSameDay(day, new Date());
@@ -158,7 +221,7 @@ export default function CalendarPage() {
                     onClick={() => setSelected(day)}
                     className={cn(
                       "calendar-day flex min-h-9 w-full min-w-0 flex-col items-center justify-center rounded-lg px-0.5 py-1 text-xs sm:min-h-11 sm:rounded-xl sm:px-1 sm:py-1.5 sm:text-sm",
-                      !inMonth && "text-muted-foreground/45",
+                      !inMonth && "text-muted-foreground/70",
                       isSelected
                         ? "bg-primary text-primary-foreground shadow-sm"
                         : "hover:bg-white/15 dark:hover:bg-white/10",
@@ -181,7 +244,29 @@ export default function CalendarPage() {
                         <span
                           className={cn(
                             "h-1 w-1 rounded-full",
-                            isSelected ? "bg-primary-foreground/55" : "bg-muted-foreground"
+                            isSelected
+                              ? "bg-primary-foreground/55"
+                              : "bg-muted-foreground"
+                          )}
+                        />
+                      )}
+                      {hasProject && (
+                        <span
+                          className={cn(
+                            "h-1 w-1 rounded-full",
+                            isSelected
+                              ? "bg-primary-foreground/40"
+                              : "bg-amber-500"
+                          )}
+                        />
+                      )}
+                      {hasChecklist && (
+                        <span
+                          className={cn(
+                            "h-1 w-1 rounded-full",
+                            isSelected
+                              ? "bg-primary-foreground/30"
+                              : "bg-emerald-500"
                           )}
                         />
                       )}
@@ -198,7 +283,9 @@ export default function CalendarPage() {
               className="lp-glass animate-fade-up rounded-2xl border p-4 sm:p-5"
             >
               <div className="mb-3 flex items-center justify-between gap-2">
-                <h2 className="text-sm font-semibold">{format(selected, "EEE, MMM d")}</h2>
+                <h2 className="text-sm font-semibold">
+                  {format(selected, "EEE, MMM d")}
+                </h2>
                 <div className="flex gap-1">
                   <Button
                     type="button"
@@ -223,50 +310,114 @@ export default function CalendarPage() {
                 </div>
               </div>
 
-              <h3 className="mb-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                Events
-              </h3>
-              {dayEvents.length === 0 ? (
-                <p className="mb-4 text-sm text-muted-foreground">No events.</p>
+              {dayEmpty ? (
+                <p className="text-sm text-muted-foreground">
+                  Nothing scheduled for this day.
+                </p>
               ) : (
-                <ul className="mb-4 space-y-2.5">
-                  {dayEvents.map((e) => (
-                    <li key={e.id} className="lp-glass-soft list-row-enter rounded-xl border px-3 py-2.5">
-                      <div className="flex items-start justify-between gap-2">
-                        <p className="text-sm font-medium">{e.title}</p>
-                        <Badge variant="secondary">{e.event_type}</Badge>
-                      </div>
-                      <p className="mt-0.5 text-xs text-muted-foreground">
-                        {e.all_day ? "All day" : new Date(e.start_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
-                        {e.location ? ` · ${e.location}` : ""}
-                      </p>
-                    </li>
-                  ))}
-                </ul>
-              )}
+                <>
+                  {dayEvents.length > 0 && (
+                    <DaySection title="Events">
+                      {dayEvents.map((e) => (
+                        <li
+                          key={e.id}
+                          className="lp-glass-soft list-row-enter rounded-xl border px-3 py-2.5"
+                        >
+                          <div className="flex items-start justify-between gap-2">
+                            <p className="text-sm font-medium">{e.title}</p>
+                            <Badge variant="secondary">{e.event_type}</Badge>
+                          </div>
+                          <p className="mt-0.5 text-xs text-muted-foreground">
+                            {e.all_day
+                              ? "All day"
+                              : new Date(e.start_at).toLocaleTimeString([], {
+                                  hour: "2-digit",
+                                  minute: "2-digit",
+                                })}
+                            {e.location ? ` · ${e.location}` : ""}
+                          </p>
+                        </li>
+                      ))}
+                    </DaySection>
+                  )}
 
-              <h3 className="mb-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                Task due dates
-              </h3>
-              {dayTasks.length === 0 ? (
-                <p className="text-sm text-muted-foreground">No tasks due.</p>
-              ) : (
-                <ul className="space-y-2.5">
-                  {dayTasks.map((t) => (
-                    <li key={t.id} className="lp-glass-soft list-row-enter rounded-xl border px-3 py-2.5">
-                      <p className="text-sm font-medium">{t.title}</p>
-                      <p className="mt-0.5 text-xs text-muted-foreground">
-                        Due {t.due_date}
-                        {t.due_time ? ` at ${t.due_time}` : ""}
-                      </p>
-                    </li>
-                  ))}
-                </ul>
+                  {dayTasks.length > 0 && (
+                    <DaySection title="Tasks">
+                      {dayTasks.map((t) => (
+                        <li
+                          key={t.id}
+                          className="lp-glass-soft list-row-enter rounded-xl border px-3 py-2.5"
+                        >
+                          <div className="flex items-start justify-between gap-2">
+                            <p className="text-sm font-medium">{t.title}</p>
+                            <Badge variant="secondary">{t.priority}</Badge>
+                          </div>
+                          <p className="mt-0.5 text-xs text-muted-foreground">
+                            Due {dayKey(t.due_date)}
+                            {t.due_time ? ` at ${t.due_time}` : ""}
+                          </p>
+                        </li>
+                      ))}
+                    </DaySection>
+                  )}
+
+                  {dayProjects.length > 0 && (
+                    <DaySection title="Project deadlines">
+                      {dayProjects.map((p) => (
+                        <li
+                          key={p.id}
+                          className="lp-glass-soft list-row-enter rounded-xl border px-3 py-2.5"
+                        >
+                          <div className="flex items-start justify-between gap-2">
+                            <p className="text-sm font-medium">{p.name}</p>
+                            <Badge variant="secondary">{p.priority}</Badge>
+                          </div>
+                          <p className="mt-0.5 text-xs text-muted-foreground">
+                            Deadline {dayKey(p.deadline)}
+                          </p>
+                        </li>
+                      ))}
+                    </DaySection>
+                  )}
+
+                  {dayChecklistItems.length > 0 && (
+                    <DaySection title="Checklist items">
+                      {dayChecklistItems.map((item) => (
+                        <li
+                          key={item.id}
+                          className="lp-glass-soft list-row-enter rounded-xl border px-3 py-2.5"
+                        >
+                          <p className="text-sm font-medium">{item.title}</p>
+                          <p className="mt-0.5 text-xs text-muted-foreground">
+                            {item.checklist_title} · Due {dayKey(item.due_date)}
+                          </p>
+                        </li>
+                      ))}
+                    </DaySection>
+                  )}
+                </>
               )}
             </section>
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+function DaySection({
+  title,
+  children,
+}: {
+  title: string;
+  children: ReactNode;
+}) {
+  return (
+    <div className="mb-4 last:mb-0">
+      <h3 className="mb-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">
+        {title}
+      </h3>
+      <ul className="space-y-2.5">{children}</ul>
     </div>
   );
 }

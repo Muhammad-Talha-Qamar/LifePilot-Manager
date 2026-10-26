@@ -14,6 +14,7 @@ import {
   toProjectCard,
   toTaskCard,
 } from "./blocks";
+import { rewriteIntent } from "./intent";
 import {
   cleanPhrase,
   normalizeCommand,
@@ -21,6 +22,7 @@ import {
   ordinalIndex,
   pickUnique,
   rankByName,
+  scoreName,
   selectionCount,
   titleCase,
 } from "./match";
@@ -144,18 +146,68 @@ function chapterItems(text: string): string[] | null {
   return [`${verb} chapter ${single[1]}`];
 }
 
+/** Split "milk and eggs" / "milk, eggs, bread" into checklist item titles. */
+function parseItemList(text: string): string[] {
+  const cleaned = cleanPhrase(text);
+  if (!cleaned) return [];
+  return cleaned
+    .split(/\s*,\s*|\s+and\s+/i)
+    .map((part) => cleanPhrase(part))
+    .filter(Boolean);
+}
+
+/** Pull title + optional "with …" / ": …" items from a checklist create phrase. */
+function extractChecklistTitleAndItems(raw: string): { title: string; items: string[] } {
+  // "… checklist to it with A and B" (title comes from the linked project later)
+  const attachedWith = raw.match(/\bchecklist\b\s+to\s+it\s+with\s+(.+)$/i)?.[1];
+  if (attachedWith) {
+    return { title: "New checklist", items: parseItemList(attachedWith) };
+  }
+
+  const named = raw.match(/checklist\s+(?:for|called|named|titled)\s+(.+)/i)?.[1];
+  if (named) {
+    const body = named.replace(/^my\s+/i, "").trim();
+    const withItems = body.match(/^(.+?)\s+with\s+(.+)$/i) || body.match(/^(.+?)\s*:\s*(.+)$/);
+    if (withItems) {
+      return {
+        title: titleCase(cleanPhrase(withItems[1]) || "New checklist"),
+        items: parseItemList(withItems[2]),
+      };
+    }
+    return {
+      title: titleCase(cleanPhrase(body) || "New checklist"),
+      items: [],
+    };
+  }
+
+  const trailingWith = raw.match(/\bchecklist\b\s+with\s+(.+)$/i)?.[1];
+  if (trailingWith) {
+    return { title: "New checklist", items: parseItemList(trailingWith) };
+  }
+
+  return { title: "New checklist", items: [] };
+}
+
+function isAddingItemsToChecklist(norm: string, context: ConversationContext): boolean {
+  if (!/^add\b/.test(norm)) return false;
+  if (/\b(?:a|an|new)\s+checklist\b/.test(norm)) return false;
+  if (/\bto (?:my |the )?.+?\s+checklist\b/.test(norm)) return true;
+  if (/\bto\s+(?:it|that|this)\b/.test(norm) && context.lastChecklist) return true;
+  return false;
+}
+
 function isYes(text: string): boolean {
-  return /^(yes|yep|yeah|confirm|do it|go ahead|delete it|yes delete(?: it)?|please delete(?: it)?)$/.test(
+  return /^(yes|yep|yeah|yup|sure|ok|okay|y|confirm|do it|go ahead|sounds good|absolutely|delete it|yes delete(?: it)?|please delete(?: it)?)$/.test(
     text
   );
 }
 
 function isNo(text: string): boolean {
-  return /^(no|nope|cancel|stop|don't|do not|never mind|nevermind)$/.test(text);
+  return /^(no|nope|nah|cancel|stop|don't|do not|never mind|nevermind|n)$/.test(text);
 }
 
 function isUndo(text: string): boolean {
-  return /^(?:please )?(?:undo|undo that|undo it|undo the last change|take that back|reverse that|reverse the last change)$/.test(
+  return /^(?:please )?(?:undo|undo that|undo it|undo the last change|take that back|reverse that|reverse the last change|oops undo)$/.test(
     text
   );
 }
@@ -297,9 +349,40 @@ async function runQuery(
     };
   }
 
+  if (
+    /\bchecklist/.test(norm) &&
+    /\b(show|list|what|which|my|see|view|display)\b/.test(norm) &&
+    !/^(?:add|create|make|start|delete|mark|complete|finish)\b/.test(norm)
+  ) {
+    const result = await act("list_checklists", { include_items: true });
+    if (!result.success) return { message: failed("load checklists", result.error), blocks: [], context };
+    const checklists = (result.result as Board["checklists"]) ?? board.checklists;
+    const cards = checklists.map((checklist) =>
+      toChecklistCard(checklist, checklist.items ?? [], board.projects)
+    );
+    if (checklists[0]) {
+      rememberChecklist(context, checklists[0], checklists[0].items ?? []);
+    }
+    return {
+      message: checklists.length
+        ? `You have ${checklists.length} checklist(s): ${checklists.map((checklist) => checklist.title).join(", ")}.`
+        : "You have no checklists yet.",
+      blocks: checklists.length
+        ? [{ type: "checklists", title: "Your checklists", checklists: cards }]
+        : [],
+      context,
+    };
+  }
+
   const period = detectPeriodKind(norm);
   const ranged = norm.match(/\bfrom\s+(\d{4}-\d{2}-\d{2})\s+(?:to|through)\s+(\d{4}-\d{2}-\d{2})\b/);
-  if (!period && !ranged && !/\b(what|show|list|which|how much|how many)\b/.test(norm)) {
+  if (
+    !period &&
+    !ranged &&
+    !/\b(what|show|list|which|how much|how many|see|view|display|tell me|give me|any(?:thing)?)\b/.test(
+      norm
+    )
+  ) {
     return null;
   }
   if (!period && !ranged) return null;
@@ -421,13 +504,16 @@ export async function runLocalCommand(
   act: ToolHandler
 ): Promise<LocalCommandResult> {
   const context = cloneContext(incoming);
-  const norm = normalizeCommand(raw);
+  // Rewrite casual / incomplete phrasing into shapes the matchers already know.
+  const rewritten = rewriteIntent(raw);
+  const workingRaw = rewritten !== raw.trim() ? rewritten : raw;
+  const norm = normalizeCommand(workingRaw);
 
   const correction = norm.match(
     /^(?:no|nope|wait|actually|sorry)[, ]+(?:i meant|make it|change it to|it should be|that should be)\s+(.+)$/
   ) || norm.match(/^i meant\s+(.+)$/);
   if (correction) {
-    return correctFocused(correction[1], raw, context, board, act);
+    return correctFocused(correction[1], workingRaw, context, board, act);
   }
 
   if (context.pending && isYes(norm)) {
@@ -453,8 +539,13 @@ export async function runLocalCommand(
     };
   }
 
-  if (context.pendingClarification && !/^(add|create|make|show|what|move|delete|plan|which)\b/.test(norm)) {
-    const clarified = await applyClarification(norm, raw, context, board, act);
+  if (
+    context.pendingClarification &&
+    !/^(add|create|make|show|what|move|delete|plan|which|list|mark|complete|finish|schedule)\b/.test(
+      norm
+    )
+  ) {
+    const clarified = await applyClarification(norm, workingRaw, context, board, act);
     if (clarified) return clarified;
   } else if (context.pendingClarification) {
     context.pendingClarification = null;
@@ -517,9 +608,10 @@ export async function runLocalCommand(
     };
   }
 
-  const isMutation = /^(?:please\s+)?(?:add|create|make|new|move|mark|delete|complete|finish|change|set|give|reschedule|shift|schedule)\b/.test(
-    norm
-  );
+  const isMutation =
+    /^(?:please\s+)?(?:add|create|make|new|move|mark|delete|complete|finish|change|set|give|reschedule|shift|schedule|put|assign|remove|postpone)\b/.test(
+      norm
+    );
   if (!isMutation) {
     const queried = await runQuery(norm, board, context, act);
     if (queried) return queried;
@@ -584,25 +676,115 @@ export async function runLocalCommand(
     };
   }
 
+  const moveOneInto = norm.match(
+    /^(?:move|put|assign) (.+?) into (?:the |my )?(.+?)(?: project)?$/
+  );
+  if (moveOneInto && !/\ball\b/.test(norm)) {
+    const taskResolved = resolveTaskPhrase(moveOneInto[1], board, context);
+    if ("ask" in taskResolved) return { message: taskResolved.ask, blocks: [], context };
+    if ("none" in taskResolved) return { message: taskResolved.none, blocks: [], context };
+    const projectResolved = resolveProjectPhrase(
+      moveOneInto[2].replace(/\s+project$/, ""),
+      board,
+      context
+    );
+    if ("ask" in projectResolved) return { message: projectResolved.ask, blocks: [], context };
+    if ("none" in projectResolved) return { message: projectResolved.none, blocks: [], context };
+    const target = taskResolved.tasks[0];
+    const project = projectResolved.project;
+    const result = await act("move_tasks_to_project", {
+      project_id: project.id,
+      task_ids: [target.id],
+    });
+    if (!result.success) return { message: failed("move that task", result.error), blocks: [], context };
+    const payload = result.result as { updated: Task[]; project: Project };
+    const moved = payload.updated[0] ?? target;
+    rememberTask(context, moved);
+    rememberProject(context, payload.project);
+    return {
+      message: `Moved “${moved.title}” into “${payload.project.name}”.`,
+      blocks: [
+        {
+          type: "tasks",
+          title: payload.project.name,
+          tasks: [toTaskCard(moved, [payload.project], board.timezone)],
+        },
+      ],
+      context,
+    };
+  }
+
   const deadline = norm.match(
     /(?:change|move|set|update) (?:the )?(?:deadline|due date) of (?:my )?(.+?) to (.+)/
   );
   if (deadline) {
-    return reschedule(deadline[1], deadline[2], raw, context, board, act);
+    return reschedule(deadline[1], deadline[2], workingRaw, context, board, act);
   }
 
   const moveOne = norm.match(/^(?:move|reschedule|shift) (.+?) to (.+)/);
-  if (moveOne) return reschedule(moveOne[1], moveOne[2], raw, context, board, act);
+  if (moveOne) return reschedule(moveOne[1], moveOne[2], workingRaw, context, board, act);
 
-  if (/^(?:mark|complete|finish|check off)\b/.test(norm) && (/checklist|items?\b/.test(norm) || selectionCount(norm))) {
-    return completeChecklist(norm, raw, context, board, act);
+  if (
+    /^(?:mark|complete|finish|check off)\b/.test(norm) &&
+    (/checklist|items?\b/.test(norm) || selectionCount(norm))
+  ) {
+    return completeChecklist(norm, workingRaw, context, board, act);
   }
 
-  const completeTask = norm.match(/^(?:mark|complete|finish) (.+?)(?: as (?:complete|completed|done))?$/);
+  const completeTask = norm.match(
+    /^(?:mark|complete|finish) (.+?)(?: as (?:complete|completed|done))?$/
+  );
   if (completeTask && !/checklist/.test(norm)) {
-    const resolved = resolveTaskPhrase(completeTask[1].replace(/\bas (complete|completed|done)\b/, ""), board, context);
+    const phrase = completeTask[1].replace(/\bas (complete|completed|done)\b/, "");
+    // Prefer checklist items when the phrase matches an item title.
+    const itemHits = board.checklists.flatMap((checklist) =>
+      checklist.items
+        .filter((item) => !item.is_completed)
+        .filter((item) => scoreName(phrase, item.title) >= 80)
+        .map((item) => ({ checklist, item }))
+    );
+    if (itemHits.length === 1) {
+      const hit = itemHits[0];
+      const result = await act("complete_checklist_items", {
+        checklist_id: hit.checklist.id,
+        item_ids: [hit.item.id],
+      });
+      if (!result.success) {
+        return { message: failed(`complete “${hit.item.title}”`, result.error), blocks: [], context };
+      }
+      const payload = result.result as {
+        checklist: { id: string; title: string; project_id: string | null };
+        items: ChecklistItem[];
+      };
+      rememberChecklist(context, payload.checklist, payload.items);
+      return {
+        message: `Marked “${hit.item.title}” complete on “${payload.checklist.title}”.`,
+        blocks: [
+          {
+            type: "checklists",
+            title: payload.checklist.title,
+            checklists: [toChecklistCard(payload.checklist, payload.items, board.projects)],
+          },
+        ],
+        context,
+      };
+    }
+
+    const resolved = resolveTaskPhrase(phrase, board, context);
     if ("ask" in resolved) return { message: resolved.ask, blocks: [], context };
-    if ("none" in resolved) return { message: resolved.none, blocks: [], context };
+    if ("none" in resolved) {
+      if (itemHits.length > 1) {
+        return {
+          message: askAmbiguous(
+            itemHits.map((hit) => hit.item.title),
+            "checklist item"
+          ),
+          blocks: [],
+          context,
+        };
+      }
+      return { message: resolved.none, blocks: [], context };
+    }
     const target = resolved.tasks[0];
     const result = await act("complete_task", { id: target.id });
     const task = taskFrom(result.result);
@@ -619,24 +801,33 @@ export async function runLocalCommand(
 
   if (/^delete\b/.test(norm)) return requestDelete(norm, context, board);
 
-  const chapters = chapterItems(raw);
+  const chapters = chapterItems(workingRaw);
   if (chapters && (/checklist/.test(norm) || context.lastChecklist || /^add\b/.test(norm))) {
     const added = await addItems(chapters, norm, context, board, act);
     if (added) return added;
   }
 
-  if (/checklist/.test(norm) && /^(?:add|create|make|start)\b/.test(norm)) {
-    return createChecklistCommand(raw, norm, context, board, act);
-  }
-
-  if (/^add\b/.test(norm) && /checklist/.test(norm)) {
-    const title = raw.replace(/^add\s+/i, "").replace(/\s+to\s+.+$/i, "");
-    const added = await addItems([cleanPhrase(title)], norm, context, board, act);
+  if (isAddingItemsToChecklist(norm, context)) {
+    const itemPart = workingRaw
+      .replace(/^add\s+/i, "")
+      .replace(/\s+to\s+(?:my |the )?.+$/i, "");
+    const titles = parseItemList(itemPart);
+    const added = await addItems(
+      titles.length ? titles : [cleanPhrase(itemPart)].filter(Boolean),
+      norm,
+      context,
+      board,
+      act
+    );
     if (added) return added;
   }
 
+  if (/checklist/.test(norm) && /^(?:add|create|make|start)\b/.test(norm)) {
+    return createChecklistCommand(workingRaw, norm, context, board, act);
+  }
+
   if (/\bproject\b/.test(norm) && /^(?:add|create|make|start)\b/.test(norm)) {
-    return createProjectCommand(raw, norm, context, board, act);
+    return createProjectCommand(workingRaw, norm, context, board, act);
   }
 
   if (
@@ -645,16 +836,28 @@ export async function runLocalCommand(
     !/\bproject\b/.test(norm) &&
     !/\bchecklist\b/.test(norm)
   ) {
-    return createEventCommand(raw, norm, context, board, act);
+    return createEventCommand(workingRaw, norm, context, board, act);
   }
 
   if (/^(?:add|create|make|new)\b/.test(norm)) {
-    return createTaskCommand(raw, norm, context, board, act);
+    return createTaskCommand(workingRaw, norm, context, board, act);
+  }
+
+  // Last resort: if they named an existing task without a verb, surface it.
+  const maybeTask = resolveTaskPhrase(workingRaw, board, context);
+  if ("tasks" in maybeTask && maybeTask.tasks.length === 1 && cleanPhrase(workingRaw).length > 2) {
+    const task = maybeTask.tasks[0];
+    rememberTask(context, task);
+    return {
+      message: `Found “${task.title}”${task.due_date ? `, due ${formatDateOnly(task.due_date)}` : ""}. Want me to mark it done, move the date, or something else?`,
+      blocks: [{ type: "tasks", title: "Matched task", tasks: [toTaskCard(task, board.projects, board.timezone)] }],
+      context,
+    };
   }
 
   return {
     message:
-      "I'm not sure what you'd like me to do with that. Your tasks and projects were not changed. Try something simple like “Add maths homework for tomorrow,” “Show my tasks for today,” or “Create a checklist for my science exam.”",
+      "I didn't quite catch that, but I'm listening. You can say things casually — like “remind me to call mom tomorrow,” “done with maths homework,” “today?,” or “create a checklist for groceries with milk and eggs.” Your tasks weren't changed.",
     blocks: [],
     context,
   };
@@ -937,7 +1140,25 @@ function requestDelete(
     );
   }
   const subject = norm.replace(/^delete\s+(?:the\s+)?/, "");
-  const task = resolveTaskPhrase(subject, board, context);
+  if (/checklist/.test(norm) || context.focus?.kind === "checklist") {
+    const checklist = resolveChecklist(subject.replace(/\s*checklist$/, ""), board, context);
+    if ("ask" in checklist) return { message: checklist.ask, blocks: [], context };
+    if ("checklist" in checklist) {
+      return confirm(
+        `Delete checklist “${checklist.checklist.title}”?`,
+        {
+          tool: "delete_checklist",
+          args: { id: checklist.checklist.id },
+          summary: `Delete checklist “${checklist.checklist.title}”?`,
+        },
+        context
+      );
+    }
+    if ("none" in checklist && /checklist/.test(norm)) {
+      return { message: checklist.none, blocks: [], context };
+    }
+  }
+  const task = resolveTaskPhrase(subject.replace(/\s*task$/, ""), board, context);
   if ("tasks" in task) {
     const target = task.tasks[0];
     return confirm(
@@ -1002,12 +1223,17 @@ async function createChecklistCommand(
   act: ToolHandler
 ): Promise<LocalCommandResult> {
   let projectId: string | null = null;
-  let title = "New checklist";
+  const parsed = extractChecklistTitleAndItems(raw);
+  let title = parsed.title;
+  let items = parsed.items;
+
   if (/\bto it\b|\bto that\b|\bfor it\b/.test(norm) && context.lastProject) {
     const project = board.projects.find((item) => item.id === context.lastProject?.id);
     if (!project) return { message: "I lost track of which project you meant.", blocks: [], context };
     projectId = project.id;
-    title = `${project.name} checklist`;
+    if (!title || title === "New Checklist" || title === "New checklist") {
+      title = `${project.name} checklist`;
+    }
   } else if (/next project/.test(norm)) {
     const today = calendarToday(board.timezone, board.now);
     const upcoming = board.projects
@@ -1015,33 +1241,71 @@ async function createChecklistCommand(
       .sort((a, b) => (a.deadline ?? "").localeCompare(b.deadline ?? ""))[0];
     if (upcoming) {
       projectId = upcoming.id;
-      title = `${upcoming.name} checklist`;
-    } else {
+      if (!title || title === "New Checklist" || title === "New checklist") {
+        title = `${upcoming.name} checklist`;
+      }
+    } else if (!title || title === "New Checklist" || title === "New checklist") {
       title = "Next project";
     }
-  } else {
-    const named = raw.match(/checklist\s+(?:for|called|named|titled)\s+(.+)/i)?.[1];
-    title = titleCase(cleanPhrase(named?.replace(/^my\s+/i, "") || "New checklist"));
   }
+
+  // "checklist for my science exam with …" — attach to matching project when possible
+  if (!projectId && /\bfor\b/.test(norm)) {
+    const forPhrase = raw.match(/checklist\s+for\s+(?:my\s+)?(.+?)(?:\s+with\s+|$)/i)?.[1];
+    if (forPhrase) {
+      const found = resolveProjectPhrase(forPhrase, board, context);
+      if ("project" in found) {
+        projectId = found.project.id;
+        if (!title || title === "New Checklist" || title === "New checklist") {
+          title = `${found.project.name} checklist`;
+        }
+      }
+    }
+  }
+
   const result = await act("create_checklist", {
     title,
     project_id: projectId,
-    items: [],
+    items: items.map((itemTitle) => ({ title: itemTitle })),
   });
   if (!result.success) return { message: failed("create that checklist", result.error), blocks: [], context };
-  const payload = result.result as { checklist: { id: string; title: string; project_id: string | null }; items: ChecklistItem[] };
-  rememberChecklist(context, payload.checklist, payload.items);
+  const payload = result.result as {
+    checklist: { id: string; title: string; project_id: string | null };
+    items: ChecklistItem[];
+  };
+
+  // If create_checklist ignored items (older tool path), add them separately.
+  let allItems = payload.items ?? [];
+  if (items.length && allItems.length === 0) {
+    const added = await act("add_checklist_items", {
+      checklist_id: payload.checklist.id,
+      titles: items,
+    });
+    if (added.success) {
+      const addedPayload = added.result as {
+        all_items?: ChecklistItem[];
+        items?: ChecklistItem[];
+      };
+      allItems = addedPayload.all_items ?? addedPayload.items ?? [];
+    }
+  }
+
+  rememberChecklist(context, payload.checklist, allItems);
   if (projectId) {
     const project = board.projects.find((item) => item.id === projectId);
     if (project) rememberProject(context, project);
   }
+  const itemNote =
+    allItems.length > 0
+      ? ` with ${allItems.length} item(s): ${allItems.map((item) => item.title).join(", ")}`
+      : "";
   return {
-    message: `Created checklist “${payload.checklist.title}”${projectId ? " and attached it to the project" : ""}.`,
+    message: `Created checklist “${payload.checklist.title}”${projectId ? " and attached it to the project" : ""}${itemNote}.`,
     blocks: [
       {
         type: "checklists",
         title: "New checklist",
-        checklists: [toChecklistCard(payload.checklist, payload.items, board.projects)],
+        checklists: [toChecklistCard(payload.checklist, allItems, board.projects)],
       },
     ],
     context,
@@ -1055,11 +1319,41 @@ async function createProjectCommand(
   board: Board,
   act: ToolHandler
 ): Promise<LocalCommandResult> {
-  const called = raw.match(/project\s+(?:called|named|titled)\s+(.+)/i)?.[1];
-  const forPhrase = raw.match(/project\s+for\s+(.+)/i)?.[1];
+  const deadlinePhrase =
+    raw.match(/\bwith\s+(?:a\s+)?(?:deadline|due date)\s+(.+)$/i)?.[1] ??
+    raw.match(/\b(?:deadline|due)\s+(?:on\s+|by\s+)?(.+)$/i)?.[1] ??
+    "";
+  const called = raw.match(
+    /project\s+(?:called|named|titled)\s+(.+?)(?:\s+with\s+(?:a\s+)?(?:deadline|due date)\b|\s+deadline\b|\s+due\b|$)/i
+  )?.[1];
+  const forPhrase = raw.match(
+    /project\s+for\s+(.+?)(?:\s+with\s+(?:a\s+)?(?:deadline|due date)\b|\s+deadline\b|\s+due\b|$)/i
+  )?.[1];
   const source = cleanPhrase(called || forPhrase?.replace(/^my\s+/i, "") || "");
   if (!source) return { message: "What should the project be called?", blocks: [], context };
   const name = called ? cleanPhrase(called) : titleCase(source);
+
+  let deadline: string | null = null;
+  if (deadlinePhrase) {
+    const resolved = resolveDatePhrase(
+      normalizeCommand(deadlinePhrase),
+      board.timezone,
+      board.weekStartsOn,
+      board.now
+    );
+    if (resolved?.type === "ambiguous") {
+      return { message: resolved.question, blocks: [], context };
+    }
+    if (!resolved || resolved.type !== "day") {
+      return {
+        message: "That deadline needs a specific day before I create the project. I did not save one.",
+        blocks: [],
+        context,
+      };
+    }
+    deadline = resolved.date;
+  }
+
   const existing = board.projects.find((project) => project.name.toLowerCase() === name.toLowerCase());
   if (existing) {
     rememberProject(context, existing);
@@ -1069,12 +1363,12 @@ async function createProjectCommand(
       context,
     };
   }
-  const result = await act("create_project", { name });
+  const result = await act("create_project", { name, deadline });
   const project = result.result as Project | null;
   if (!result.success || !project) return { message: failed("create that project", result.error), blocks: [], context };
   rememberProject(context, project);
   return {
-    message: `Created project “${project.name}”.`,
+    message: `Created project “${project.name}”${project.deadline ? ` with deadline ${formatDateOnly(project.deadline)}` : ""}.`,
     blocks: [{ type: "projects", title: "New project", projects: [toProjectCard(project, [], [])] }],
     context,
   };
@@ -1087,11 +1381,30 @@ async function createTaskCommand(
   board: Board,
   act: ToolHandler
 ): Promise<LocalCommandResult> {
-  const match = raw.match(
-    /^(?:please\s+)?(?:add|create|make|new)\s+(?:a\s+)?(?:task\s+)?(?:called\s+|named\s+)?(.+?)(?:\s+(?:for|due|by|on)\s+(.+))?$/i
-  );
-  const title = cleanPhrase(match?.[1] || "");
-  const when = match?.[2] ? normalizeCommand(match[2]) : "";
+  const match =
+    raw.match(
+      /^(?:please\s+)?(?:add|create|make|new)\s+(?:a\s+)?(?:task\s+)?(?:called\s+|named\s+)?(.+?)(?:\s+(?:for|due|by|on|before)\s+(.+))?$/i
+    ) ||
+    raw.match(
+      /^(?:please\s+)?(?:add|create|make|new)\s+(?:a\s+)?(?:task\s+)?(?:called\s+|named\s+)?(.+)$/i
+    );
+  let title = cleanPhrase(match?.[1] || "");
+  let when = match?.[2] ? normalizeCommand(match[2]) : "";
+
+  // "add buy milk tomorrow" (date glued without for/due/by)
+  if (!when) {
+    const glued = title.match(
+      /^(.+?)\s+(today|tonight|tomorrow|yesterday|this\s+\w+|next\s+\w+|\d{4}-\d{2}-\d{2})$/i
+    );
+    if (glued) {
+      title = cleanPhrase(glued[1]);
+      when = normalizeCommand(glued[2]);
+    }
+  }
+
+  // Strip leftover "to " from "remind me to …" rewrites that slipped through
+  title = title.replace(/^to\s+/i, "").trim();
+
   if (!title || /^(a )?(checklist|project)\b/i.test(title)) {
     return { message: "What should I call the task?", blocks: [], context };
   }
@@ -1157,7 +1470,9 @@ async function createEventCommand(
       context,
     };
   }
-  const dated = raw.match(/\b(?:on|for)\s+(.+?)(?:\s+at\s+\d|$)/i);
+  const dated =
+    raw.match(/\b(?:on|for)\s+(.+?)(?:\s+at\s+\d|$)/i) ??
+    raw.match(/\b(today|tomorrow|tonight|yesterday|next\s+\w+|this\s+\w+)\b(?=\s+at\s+\d|$)/i);
   const datePhrase = dated ? normalizeCommand(dated[1]) : "";
   let day = calendarToday(board.timezone, board.now);
   if (datePhrase) {
@@ -1178,6 +1493,7 @@ async function createEventCommand(
     raw
       .replace(/^(?:please\s+)?(?:add|create|schedule|make)\s+(?:an?\s+)?(?:new\s+)?(?:event|meeting|appointment|exam)\s+(?:called\s+|named\s+)?/i, "")
       .replace(/\s+\b(?:on|for)\s+.+$/i, "")
+      .replace(/\s+\b(?:today|tomorrow|tonight|yesterday|next\s+\w+|this\s+\w+)\b/i, "")
       .replace(/\s+\bat\s+\d{1,2}(?::\d{2})?\s*(?:am|pm)?/i, "")
   );
   if (!title) return { message: "What should I call the event?", blocks: [], context };

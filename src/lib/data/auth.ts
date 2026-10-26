@@ -1,5 +1,7 @@
-import { DEFAULT_TIMEZONE, DEMO_USER_EMAIL, DEMO_USER_ID, isDemoMode } from "@/lib/config";
+import { DEFAULT_TIMEZONE, isDemoMode } from "@/lib/config";
+import { readSessionFromCookies } from "@/lib/auth/session";
 import { getDemoStore } from "@/lib/demo/store";
+import { findDemoUserById } from "@/lib/demo/users";
 import { createClient } from "@/lib/supabase/server";
 import type { Profile } from "@/types";
 
@@ -12,12 +14,32 @@ export interface AuthContext {
 
 export async function requireAuth(): Promise<AuthContext> {
   if (isDemoMode()) {
-    const store = await getDemoStore();
+    const session = await readSessionFromCookies();
+    if (!session) {
+      throw new AuthError("Authentication required");
+    }
+
+    const user = await findDemoUserById(session.userId);
+    if (!user) {
+      throw new AuthError("Authentication required");
+    }
+
+    const store = await getDemoStore(user.id, {
+      email: user.email,
+      fullName: user.full_name,
+    });
+
     return {
-      userId: DEMO_USER_ID,
-      email: DEMO_USER_EMAIL,
+      userId: user.id,
+      email: user.email,
       isDemo: true,
-      profile: store.profile,
+      // Prefer signup time over store reset timestamps
+      profile: {
+        ...store.profile,
+        email: user.email,
+        full_name: user.full_name ?? store.profile.full_name,
+        created_at: user.created_at || store.profile.created_at,
+      },
     };
   }
 

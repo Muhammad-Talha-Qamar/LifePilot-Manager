@@ -21,7 +21,9 @@ const ZONES = [
 export default function SettingsPage() {
   const [prefs, setPrefs] = useState<ProductivityPreferences | null>(null);
   const [openai, setOpenai] = useState<boolean | null>(null);
+  const [isDemo, setIsDemo] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [resetting, setResetting] = useState(false);
 
   useEffect(() => {
     void api<ProductivityPreferences>("/api/preferences")
@@ -32,7 +34,27 @@ export default function SettingsPage() {
     void api<{ openai: boolean }>("/api/health")
       .then((health) => setOpenai(health.openai))
       .catch(() => setOpenai(null));
+    void api<{ isDemo: boolean }>("/api/auth/me")
+      .then((me) => setIsDemo(me.isDemo))
+      .catch(() => setIsDemo(false));
   }, []);
+
+  async function resetBoard(sample: boolean) {
+    if (resetting) return;
+    setResetting(true);
+    try {
+      await api("/api/demo/reset", {
+        method: "POST",
+        body: JSON.stringify({ sample }),
+      });
+      toast.success(sample ? "Sample data loaded" : "Board cleared");
+      window.location.reload();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Could not update board");
+    } finally {
+      setResetting(false);
+    }
+  }
 
   async function save() {
     if (!prefs) return;
@@ -125,6 +147,35 @@ export default function SettingsPage() {
             </div>
             <Button type="button" className="rounded-xl" onClick={() => void save()} disabled={saving}>
               {saving ? "Saving…" : "Save settings"}
+            </Button>
+          </div>
+        </section>
+      )}
+
+      {isDemo && (
+        <section className="lp-glass animate-fade-up rounded-2xl border p-5" style={{ animationDelay: "120ms" }}>
+          <h2 className="text-sm font-semibold">Your board</h2>
+          <p className="mt-2 text-sm text-muted-foreground">
+            New accounts start empty. Clear everything, or load optional sample data to explore.
+          </p>
+          <div className="mt-4 flex flex-wrap gap-2">
+            <Button
+              type="button"
+              variant="outline"
+              className="rounded-xl"
+              disabled={resetting}
+              onClick={() => void resetBoard(false)}
+            >
+              Clear my data
+            </Button>
+            <Button
+              type="button"
+              variant="secondary"
+              className="rounded-xl"
+              disabled={resetting}
+              onClick={() => void resetBoard(true)}
+            >
+              Load sample data
             </Button>
           </div>
         </section>

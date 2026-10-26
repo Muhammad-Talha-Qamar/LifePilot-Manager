@@ -148,20 +148,33 @@ export function normalizeCommand(input: string): string {
   return input
     .toLowerCase()
     .replace(/[’']/g, "'")
-    .replace(/[?!.,]+/g, " ")
+    .replace(/[?!.,;:]+/g, " ")
     .replace(/\s+/g, " ")
     .trim()
     .replace(/\b(tommorow|tommorrow|tomorow|tomorro|tmrw|tmr)\b/g, "tomorrow")
-    .replace(/\b(cheklist|checklst|chcklist|check list)\b/g, "checklist")
-    .replace(/\b(compleat|complet|complte)\b/g, "complete")
-    .replace(/\b(projct|projet)\b/g, "project")
+    .replace(/\b(todsy|tdy|tday)\b/g, "today")
+    .replace(/\b(cheklist|checklst|chcklist|check list|chklist)\b/g, "checklist")
+    .replace(/\b(compleat|complet|complte|compelete)\b/g, "complete")
+    .replace(/\b(projct|projet|proejct)\b/g, "project")
+    .replace(/\b(appoinment|appoitment|appt)\b/g, "appointment")
+    .replace(/\b(meetng|mtg)\b/g, "meeting")
+    .replace(/\b(delet|dleete|rmove|remov)\b/g, "delete")
+    .replace(/\b(schdule|sheduling|schedual)\b/g, "schedule")
+    .replace(/\b(tomorow'?s|tomorrow'?s)\b/g, "tomorrow")
     .replace(/\bwats\b/g, "what is")
     .replace(/\bwhats\b/g, "what is")
+    .replace(/\bidk\b/g, "i don't know")
     .replace(/\bgonna\b/g, "going to")
     .replace(/\bwanna\b/g, "want to")
+    .replace(/\bgimme\b/g, "give me")
+    .replace(/\blemme\b/g, "let me")
     .replace(/\bteh\b/g, "the")
     .replace(/\bpls\b/g, "please")
-    .replace(/\bhw\b/g, "homework");
+    .replace(/\bplz\b/g, "please")
+    .replace(/\bhw\b/g, "homework")
+    .replace(/\basap\b/g, "urgent")
+    .replace(/\bto-?dos?\b/g, "tasks")
+    .replace(/\bdead line\b/g, "deadline");
 }
 
 export function cleanPhrase(value: string): string {

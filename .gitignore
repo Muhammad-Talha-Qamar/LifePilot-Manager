@@ -45,4 +45,6 @@ next-env.d.ts
 
 # local demo data / agent junk
 .demo-data.json
+.demo-data/
+.demo-users.json
 .cursor/

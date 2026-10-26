@@ -22,7 +22,7 @@ const SelectTrigger = React.forwardRef<
   >
     {children}
     <SelectPrimitive.Icon asChild>
-      <ChevronDown className="h-4 w-4 opacity-50" />
+      <ChevronDown className="h-4 w-4 text-foreground/70" />
     </SelectPrimitive.Icon>
   </SelectPrimitive.Trigger>
 ));
@@ -36,7 +36,7 @@ const SelectContent = React.forwardRef<
     <SelectPrimitive.Content
       ref={ref}
       className={cn(
-        "select-content lp-glass relative z-50 max-h-96 min-w-[8rem] overflow-hidden rounded-lg border text-popover-foreground",
+        "select-content lp-glass relative z-[60] max-h-96 min-w-[8rem] max-w-[min(100vw-2rem,24rem)] overflow-hidden rounded-lg border text-popover-foreground",
         position === "popper" &&
           "data-[side=bottom]:translate-y-1 data-[side=top]:-translate-y-1",
         className

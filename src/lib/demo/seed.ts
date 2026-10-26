@@ -31,15 +31,70 @@ export interface DemoStore {
   reminders: Reminder[];
 }
 
-export function createSeedStore(): DemoStore {
+/** Empty account — used for every new sign-up. No sample tasks/checklists. */
+export function createEmptyStore(
+  userId: string,
+  email: string,
+  fullName: string | null = null
+): DemoStore {
+  const now = new Date().toISOString();
+  const profile: Profile = {
+    id: userId,
+    email,
+    full_name: fullName,
+    avatar_url: null,
+    timezone: DEFAULT_TIMEZONE,
+    created_at: now,
+    updated_at: now,
+  };
+
+  const preferences: ProductivityPreferences = {
+    id: generatePrefId(userId),
+    user_id: userId,
+    preferred_working_hours_start: "09:00",
+    preferred_working_hours_end: "17:00",
+    planning_style: "priority_first",
+    default_task_duration_minutes: 45,
+    timezone: profile.timezone,
+    week_starts_on: 1,
+    reminder_lead_minutes: 60,
+    categories: ["Homework", "Exams", "Personal", "Health"],
+    created_at: now,
+    updated_at: now,
+  };
+
+  return {
+    profile,
+    preferences,
+    projects: [],
+    tasks: [],
+    checklists: [],
+    checklist_items: [],
+    events: [],
+    reminders: [],
+  };
+}
+
+function generatePrefId(userId: string): string {
+  // Deterministic-looking uuid-ish id for preferences row
+  const hex = userId.replace(/-/g, "").padEnd(32, "0").slice(0, 32);
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-4${hex.slice(13, 16)}-8${hex.slice(17, 20)}-${hex.slice(20, 32)}`;
+}
+
+/** Optional sample board — only loaded when the user asks to restore demo data. */
+export function createSeedStore(
+  userId: string = DEMO_USER_ID,
+  email: string = DEMO_USER_EMAIL,
+  fullName: string | null = "Demo User"
+): DemoStore {
   const now = new Date().toISOString();
   const projectId = "11111111-1111-4111-8111-111111111111";
   const checklistId = "22222222-2222-4222-8222-222222222222";
 
   const profile: Profile = {
-    id: DEMO_USER_ID,
-    email: DEMO_USER_EMAIL,
-    full_name: "Demo User",
+    id: userId,
+    email,
+    full_name: fullName,
     avatar_url: null,
     timezone: DEFAULT_TIMEZONE,
     created_at: now,
@@ -48,7 +103,7 @@ export function createSeedStore(): DemoStore {
 
   const preferences: ProductivityPreferences = {
     id: "33333333-3333-4333-8333-333333333333",
-    user_id: DEMO_USER_ID,
+    user_id: userId,
     preferred_working_hours_start: "09:00",
     preferred_working_hours_end: "17:00",
     planning_style: "priority_first",
@@ -64,7 +119,7 @@ export function createSeedStore(): DemoStore {
   const projects: Project[] = [
     {
       id: projectId,
-      user_id: DEMO_USER_ID,
+      user_id: userId,
       name: "History Research Project",
       description: "Organize research, outline, and final draft for history class.",
       status: "active",
@@ -80,7 +135,7 @@ export function createSeedStore(): DemoStore {
   const tasks: Task[] = [
     {
       id: "44444444-4444-4444-8444-444444444401",
-      user_id: DEMO_USER_ID,
+      user_id: userId,
       title: "Finish maths homework",
       description: "Chapter 5 problems 1–20",
       status: "todo",
@@ -98,7 +153,7 @@ export function createSeedStore(): DemoStore {
     },
     {
       id: "44444444-4444-4444-8444-444444444402",
-      user_id: DEMO_USER_ID,
+      user_id: userId,
       title: "Read history sources",
       description: "Primary sources for research paper",
       status: "in_progress",
@@ -116,7 +171,7 @@ export function createSeedStore(): DemoStore {
     },
     {
       id: "44444444-4444-4444-8444-444444444403",
-      user_id: DEMO_USER_ID,
+      user_id: userId,
       title: "Submit science lab report",
       description: null,
       status: "todo",
@@ -134,7 +189,7 @@ export function createSeedStore(): DemoStore {
     },
     {
       id: "44444444-4444-4444-8444-444444444404",
-      user_id: DEMO_USER_ID,
+      user_id: userId,
       title: "Outline history paper",
       description: "Create section outline",
       status: "todo",
@@ -155,7 +210,7 @@ export function createSeedStore(): DemoStore {
   const checklists: Checklist[] = [
     {
       id: checklistId,
-      user_id: DEMO_USER_ID,
+      user_id: userId,
       title: "Science exam prep",
       description: "Checklist for upcoming science exam",
       category: "Exams",
@@ -171,7 +226,7 @@ export function createSeedStore(): DemoStore {
     {
       id: "55555555-5555-4555-8555-555555555501",
       checklist_id: checklistId,
-      user_id: DEMO_USER_ID,
+      user_id: userId,
       title: "Review chapter notes",
       is_completed: true,
       due_date: dateDaysFromNow(-2),
@@ -183,7 +238,7 @@ export function createSeedStore(): DemoStore {
     {
       id: "55555555-5555-4555-8555-555555555502",
       checklist_id: checklistId,
-      user_id: DEMO_USER_ID,
+      user_id: userId,
       title: "Practice past paper",
       is_completed: false,
       due_date: dateDaysFromNow(1),
@@ -195,7 +250,7 @@ export function createSeedStore(): DemoStore {
     {
       id: "55555555-5555-4555-8555-555555555503",
       checklist_id: checklistId,
-      user_id: DEMO_USER_ID,
+      user_id: userId,
       title: "Memorize key formulas",
       is_completed: false,
       due_date: dateDaysFromNow(2),
@@ -209,7 +264,7 @@ export function createSeedStore(): DemoStore {
   const events: CalendarEvent[] = [
     {
       id: "66666666-6666-4666-8666-666666666601",
-      user_id: DEMO_USER_ID,
+      user_id: userId,
       title: "Science exam",
       description: "Room 204",
       location: "School — Room 204",
@@ -223,7 +278,7 @@ export function createSeedStore(): DemoStore {
     },
     {
       id: "66666666-6666-4666-8666-666666666602",
-      user_id: DEMO_USER_ID,
+      user_id: userId,
       title: "History project deadline",
       description: "Final submission",
       location: null,
@@ -240,7 +295,7 @@ export function createSeedStore(): DemoStore {
   const reminders: Reminder[] = [
     {
       id: "77777777-7777-4777-8777-777777777701",
-      user_id: DEMO_USER_ID,
+      user_id: userId,
       title: "Science lab report is overdue",
       body: "Submit your science lab report as soon as possible.",
       remind_at: now,

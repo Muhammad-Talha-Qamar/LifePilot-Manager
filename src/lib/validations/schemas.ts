@@ -139,6 +139,18 @@ export const savePreferenceSchema = z.object({
   categories: z.array(z.string().max(50)).max(50).optional(),
 });
 
+/** Compressed JPEG data URL from the client, or null to clear. */
+export const updateProfileAvatarSchema = z.object({
+  avatar_url: z
+    .union([
+      z.null(),
+      z
+        .string()
+        .regex(/^data:image\/jpeg;base64,/, "Expected a JPEG data URL")
+        .max(400_000, "Image is too large"),
+    ]),
+});
+
 export const listTasksFilterSchema = z.object({
   status: taskStatusSchema.optional(),
   priority: prioritySchema.optional(),

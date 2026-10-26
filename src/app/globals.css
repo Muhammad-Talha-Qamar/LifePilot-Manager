@@ -9,14 +9,14 @@
   --popover: #ffffff;
   --popover-foreground: #1a1c1f;
   /* Restrained slate-blue accent */
-  --primary: #4f6d9c;
+  --primary: #3d5f91;
   --primary-foreground: #f7f9fc;
-  --secondary: #eef0f4;
-  --secondary-foreground: #2a2d33;
-  --muted: #eef0f3;
-  --muted-foreground: #6b7079;
-  --accent: #ebeff5;
-  --accent-foreground: #2a2d33;
+  --secondary: #e8ebf1;
+  --secondary-foreground: #1f2329;
+  --muted: #e8ebf0;
+  --muted-foreground: #3f4550;
+  --accent: #e4e9f1;
+  --accent-foreground: #1f2329;
   --destructive: #c23b4a;
   --destructive-foreground: #fff7f7;
   --border: #e3e6ec;
@@ -62,14 +62,14 @@
   --card-foreground: #ececeb;
   --popover: #1c1d1f;
   --popover-foreground: #ececeb;
-  --primary: #8fa8ce;
+  --primary: #a8c0e4;
   --primary-foreground: #12141a;
-  --secondary: #26282b;
-  --secondary-foreground: #ececeb;
+  --secondary: #2a2d32;
+  --secondary-foreground: #f2f3f5;
   --muted: #222426;
-  --muted-foreground: #9a9ea6;
-  --accent: #26282b;
-  --accent-foreground: #ececeb;
+  --muted-foreground: #c8ccd4;
+  --accent: #2a2d32;
+  --accent-foreground: #f2f3f5;
   --destructive: #e06b76;
   --destructive-foreground: #fff7f7;
   --border: #2c2e32;
@@ -232,36 +232,39 @@ body {
   }
 }
 
+/* Use opacity/scale only — Tailwind v4 `translate-*` is a separate property.
+   Animating `transform: translate(-50%,…)` would double-offset and shove
+   dialogs off-screen on mobile. */
 @keyframes dialog-in {
   from {
     opacity: 0;
-    transform: translate(-50%, calc(-50% + 8px)) scale(0.97);
+    scale: 0.97;
   }
   to {
     opacity: 1;
-    transform: translate(-50%, -50%) scale(1);
+    scale: 1;
   }
 }
 
 @keyframes dialog-out {
   from {
     opacity: 1;
-    transform: translate(-50%, -50%) scale(1);
+    scale: 1;
   }
   to {
     opacity: 0;
-    transform: translate(-50%, calc(-50% + 6px)) scale(0.98);
+    scale: 0.98;
   }
 }
 
 @keyframes popover-in {
   from {
     opacity: 0;
-    transform: scale(0.96) translateY(-2px);
+    scale: 0.96;
   }
   to {
     opacity: 1;
-    transform: scale(1) translateY(0);
+    scale: 1;
   }
 }
 
@@ -552,34 +555,36 @@ body {
 
 /* Glass navigation — matches assistant translucent language */
 .lp-nav-bar {
-  border-bottom: 1px solid rgba(255, 255, 255, 0.18);
-  background: rgba(255, 255, 255, 0.22);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.28);
+  background: rgba(255, 255, 255, 0.62);
   backdrop-filter: blur(20px) saturate(1.5);
   -webkit-backdrop-filter: blur(20px) saturate(1.5);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.35);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.45);
+  color: var(--foreground);
 }
 
 .dark .lp-nav-bar {
-  background: rgba(12, 10, 18, 0.45);
-  border-bottom-color: rgba(255, 255, 255, 0.1);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06);
+  background: rgba(12, 10, 18, 0.78);
+  border-bottom-color: rgba(255, 255, 255, 0.14);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08);
 }
 
 .lp-nav-aside {
-  border-right: 1px solid rgba(255, 255, 255, 0.16);
-  background: rgba(255, 255, 255, 0.28);
+  border-right: 1px solid rgba(255, 255, 255, 0.28);
+  background: rgba(255, 255, 255, 0.66);
   backdrop-filter: blur(22px) saturate(1.45);
   -webkit-backdrop-filter: blur(22px) saturate(1.45);
   box-shadow:
-    inset -1px 0 0 rgba(255, 255, 255, 0.2),
+    inset -1px 0 0 rgba(255, 255, 255, 0.28),
     4px 0 24px rgba(99, 102, 241, 0.06);
+  color: var(--foreground);
 }
 
 .dark .lp-nav-aside {
-  background: rgba(12, 10, 18, 0.5);
-  border-right-color: rgba(255, 255, 255, 0.1);
+  background: rgba(12, 10, 18, 0.82);
+  border-right-color: rgba(255, 255, 255, 0.14);
   box-shadow:
-    inset -1px 0 0 rgba(255, 255, 255, 0.05),
+    inset -1px 0 0 rgba(255, 255, 255, 0.06),
     4px 0 28px rgba(0, 0, 0, 0.25);
 }
 
@@ -625,26 +630,28 @@ body {
 }
 
 .lp-nav-new-chat {
-  border: 1px solid rgba(255, 255, 255, 0.35) !important;
-  background: rgba(255, 255, 255, 0.22) !important;
+  border: 1px solid rgba(63, 69, 80, 0.22) !important;
+  background: rgba(255, 255, 255, 0.72) !important;
+  color: var(--foreground) !important;
   backdrop-filter: blur(12px);
   -webkit-backdrop-filter: blur(12px);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.4);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.55);
 }
 
 .dark .lp-nav-new-chat {
-  background: rgba(255, 255, 255, 0.08) !important;
-  border-color: rgba(167, 139, 250, 0.35) !important;
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.12) !important;
+  border-color: rgba(167, 139, 250, 0.45) !important;
+  color: #f8fafc !important;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.1);
 }
 
 .lp-nav-new-chat:hover:not(:disabled) {
-  background: rgba(255, 255, 255, 0.36) !important;
+  background: rgba(255, 255, 255, 0.88) !important;
   border-color: rgba(139, 92, 246, 0.45) !important;
 }
 
 .dark .lp-nav-new-chat:hover:not(:disabled) {
-  background: rgba(255, 255, 255, 0.14) !important;
+  background: rgba(255, 255, 255, 0.18) !important;
 }
 
 .lp-nav-footer {
@@ -656,15 +663,16 @@ body {
 }
 
 .lp-nav-demo {
-  border: 1px solid rgba(255, 255, 255, 0.28);
-  background: rgba(255, 255, 255, 0.18);
+  border: 1px solid rgba(63, 69, 80, 0.16);
+  background: rgba(255, 255, 255, 0.72);
   backdrop-filter: blur(10px);
   -webkit-backdrop-filter: blur(10px);
+  color: var(--muted-foreground);
 }
 
 .dark .lp-nav-demo {
-  background: rgba(255, 255, 255, 0.08);
-  border-color: rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.1);
+  border-color: rgba(255, 255, 255, 0.14);
 }
 
 .lp-nav-avatar {
@@ -676,45 +684,48 @@ body {
 
 /* Site-wide glass surfaces (same language as AI reply cards / composer) */
 .lp-glass {
-  background: rgba(255, 255, 255, 0.28) !important;
+  background: rgba(255, 255, 255, 0.78) !important;
   backdrop-filter: blur(18px) saturate(1.45);
   -webkit-backdrop-filter: blur(18px) saturate(1.45);
-  border-color: rgba(255, 255, 255, 0.42) !important;
+  border-color: rgba(255, 255, 255, 0.55) !important;
+  color: var(--foreground);
   box-shadow:
-    0 4px 20px rgba(26, 28, 31, 0.05),
-    inset 0 1px 0 rgba(255, 255, 255, 0.5) !important;
+    0 4px 20px rgba(26, 28, 31, 0.06),
+    inset 0 1px 0 rgba(255, 255, 255, 0.65) !important;
 }
 
 .dark .lp-glass {
-  background: rgba(255, 255, 255, 0.1) !important;
-  border-color: rgba(255, 255, 255, 0.14) !important;
+  background: rgba(22, 20, 30, 0.82) !important;
+  border-color: rgba(255, 255, 255, 0.16) !important;
   box-shadow:
-    0 6px 24px rgba(0, 0, 0, 0.22),
-    inset 0 1px 0 rgba(255, 255, 255, 0.08) !important;
+    0 6px 24px rgba(0, 0, 0, 0.28),
+    inset 0 1px 0 rgba(255, 255, 255, 0.1) !important;
 }
 
 .lp-glass-soft {
-  background: rgba(255, 255, 255, 0.18) !important;
+  background: rgba(255, 255, 255, 0.7) !important;
   backdrop-filter: blur(14px) saturate(1.35);
   -webkit-backdrop-filter: blur(14px) saturate(1.35);
-  border-color: rgba(255, 255, 255, 0.28) !important;
+  border-color: rgba(255, 255, 255, 0.45) !important;
+  color: var(--foreground);
 }
 
 .dark .lp-glass-soft {
-  background: rgba(255, 255, 255, 0.07) !important;
-  border-color: rgba(255, 255, 255, 0.12) !important;
+  background: rgba(255, 255, 255, 0.1) !important;
+  border-color: rgba(255, 255, 255, 0.14) !important;
 }
 
 .lp-glass-input {
-  background: rgba(255, 255, 255, 0.22) !important;
+  background: rgba(255, 255, 255, 0.82) !important;
   backdrop-filter: blur(12px);
   -webkit-backdrop-filter: blur(12px);
-  border-color: rgba(255, 255, 255, 0.35) !important;
+  border-color: rgba(63, 69, 80, 0.2) !important;
+  color: var(--foreground);
 }
 
 .dark .lp-glass-input {
-  background: rgba(255, 255, 255, 0.08) !important;
-  border-color: rgba(255, 255, 255, 0.16) !important;
+  background: rgba(255, 255, 255, 0.12) !important;
+  border-color: rgba(255, 255, 255, 0.2) !important;
 }
 
 .lp-row-hover:hover {
@@ -862,26 +873,26 @@ body {
 .ai-message-user {
   background: linear-gradient(
     135deg,
-    rgba(99, 102, 241, 0.72) 0%,
-    rgba(59, 130, 246, 0.68) 55%,
-    rgba(14, 165, 233, 0.65) 100%
+    rgba(79, 70, 229, 0.92) 0%,
+    rgba(37, 99, 235, 0.9) 55%,
+    rgba(2, 132, 200, 0.88) 100%
   );
-  color: #f8fafc;
+  color: #ffffff;
   backdrop-filter: blur(14px) saturate(1.4);
   -webkit-backdrop-filter: blur(14px) saturate(1.4);
-  border: 1px solid rgba(255, 255, 255, 0.22);
-  box-shadow: 0 4px 18px rgba(59, 130, 246, 0.2);
+  border: 1px solid rgba(255, 255, 255, 0.28);
+  box-shadow: 0 4px 18px rgba(59, 130, 246, 0.22);
 }
 
 .dark .ai-message-user {
   background: linear-gradient(
     135deg,
-    rgba(124, 58, 237, 0.55) 0%,
-    rgba(79, 70, 229, 0.5) 50%,
-    rgba(2, 132, 200, 0.48) 100%
+    rgba(124, 58, 237, 0.88) 0%,
+    rgba(79, 70, 229, 0.85) 50%,
+    rgba(2, 132, 200, 0.82) 100%
   );
-  border-color: rgba(255, 255, 255, 0.14);
-  box-shadow: 0 4px 22px rgba(124, 58, 237, 0.28);
+  border-color: rgba(255, 255, 255, 0.18);
+  box-shadow: 0 4px 22px rgba(124, 58, 237, 0.3);
 }
 
 .ai-message-assistant {
@@ -891,13 +902,13 @@ body {
 .ai-reply-text {
   border-radius: 1rem;
   padding: 0.7rem 0.85rem;
-  background: rgba(255, 255, 255, 0.28);
+  background: rgba(255, 255, 255, 0.8);
   backdrop-filter: blur(20px) saturate(1.5);
   -webkit-backdrop-filter: blur(20px) saturate(1.5);
-  border: 1px solid rgba(255, 255, 255, 0.5);
+  border: 1px solid rgba(255, 255, 255, 0.62);
   box-shadow:
-    0 4px 20px rgba(26, 28, 31, 0.05),
-    inset 0 1px 0 rgba(255, 255, 255, 0.55);
+    0 4px 20px rgba(26, 28, 31, 0.06),
+    inset 0 1px 0 rgba(255, 255, 255, 0.65);
   color: var(--foreground);
   max-width: 100%;
   overflow-wrap: anywhere;
@@ -912,10 +923,10 @@ body {
 }
 
 .dark .ai-reply-text {
-  background: rgba(255, 255, 255, 0.1);
+  background: rgba(22, 20, 30, 0.82);
   border-color: rgba(255, 255, 255, 0.18);
   box-shadow:
-    0 6px 24px rgba(0, 0, 0, 0.2),
+    0 6px 24px rgba(0, 0, 0, 0.25),
     inset 0 1px 0 rgba(255, 255, 255, 0.1);
 }
 
@@ -925,22 +936,52 @@ body {
   animation: typing-blink 1.2s infinite, ai-gradient-shift 4s ease infinite;
 }
 
+/* Soft fade into the composer — no hard divider line */
+.ai-composer-dock {
+  border-top: none;
+  background:
+    linear-gradient(
+      to bottom,
+      transparent 0%,
+      color-mix(in oklab, var(--background) 55%, transparent) 28%,
+      color-mix(in oklab, var(--background) 78%, transparent) 100%
+    );
+  backdrop-filter: blur(20px) saturate(1.2);
+  -webkit-backdrop-filter: blur(20px) saturate(1.2);
+}
+
+.dark .ai-composer-dock {
+  background:
+    linear-gradient(
+      to bottom,
+      transparent 0%,
+      color-mix(in oklab, var(--background) 50%, transparent) 30%,
+      color-mix(in oklab, var(--background) 72%, transparent) 100%
+    );
+}
+
 .ai-composer {
   position: relative;
   isolation: isolate;
   border-radius: 1.65rem;
-  background: rgba(255, 255, 255, 0.16);
+  background: rgba(255, 255, 255, 0.72);
   backdrop-filter: blur(28px) saturate(1.35);
   -webkit-backdrop-filter: blur(28px) saturate(1.35);
-  /* Force no visible stroke in any state (incl. typing / focus) */
-  border: 1px solid transparent !important;
+  /* Soft edge via light fill only — no hard stroke */
+  border: none !important;
   outline: none !important;
-  box-shadow: none !important;
+  box-shadow:
+    0 1px 2px rgba(26, 28, 31, 0.03),
+    0 8px 28px rgba(26, 28, 31, 0.06) !important;
+  color: var(--foreground);
   -webkit-tap-highlight-color: transparent;
 }
 
 .dark .ai-composer {
-  background: rgba(255, 255, 255, 0.08);
+  background: rgba(28, 26, 36, 0.72);
+  box-shadow:
+    0 1px 2px rgba(0, 0, 0, 0.2),
+    0 10px 32px rgba(0, 0, 0, 0.28) !important;
 }
 
 .ai-composer:focus-within,
@@ -948,10 +989,12 @@ body {
 .ai-composer:focus-visible,
 .ai-composer:active,
 .ai-composer:hover {
-  border-color: transparent !important;
+  border: none !important;
   outline: none !important;
-  box-shadow: none !important;
-  background: rgba(255, 255, 255, 0.16);
+  box-shadow:
+    0 1px 2px rgba(26, 28, 31, 0.04),
+    0 10px 32px rgba(26, 28, 31, 0.08) !important;
+  background: rgba(255, 255, 255, 0.82);
 }
 
 .dark .ai-composer:focus-within,
@@ -959,10 +1002,12 @@ body {
 .dark .ai-composer:focus-visible,
 .dark .ai-composer:active,
 .dark .ai-composer:hover {
-  border-color: transparent !important;
+  border: none !important;
   outline: none !important;
-  box-shadow: none !important;
-  background: rgba(255, 255, 255, 0.08);
+  box-shadow:
+    0 1px 2px rgba(0, 0, 0, 0.25),
+    0 12px 36px rgba(0, 0, 0, 0.32) !important;
+  background: rgba(28, 26, 36, 0.85);
 }
 
 .ai-composer textarea,
@@ -1010,22 +1055,19 @@ body {
 
 .ai-suggestion {
   border-radius: 999px;
-  border: 1px solid rgba(255, 255, 255, 0.4);
-  background: rgba(255, 255, 255, 0.28);
-  backdrop-filter: blur(14px) saturate(1.35);
-  -webkit-backdrop-filter: blur(14px) saturate(1.35);
+  border: none;
+  background: rgba(255, 255, 255, 0.55);
+  backdrop-filter: blur(14px) saturate(1.25);
+  -webkit-backdrop-filter: blur(14px) saturate(1.25);
   padding: 0.4rem 0.75rem;
   font-size: 0.75rem;
   line-height: 1.25;
-  color: color-mix(in oklab, var(--foreground) 92%, transparent);
-  box-shadow:
-    0 2px 10px rgba(26, 28, 31, 0.04),
-    inset 0 1px 0 rgba(255, 255, 255, 0.45);
+  color: color-mix(in oklab, var(--foreground) 78%, transparent);
+  box-shadow: 0 1px 6px rgba(26, 28, 31, 0.04);
   max-width: 100%;
   text-align: center;
   transition:
     background-color 150ms ease,
-    border-color 150ms ease,
     color 150ms ease,
     transform 150ms ease,
     box-shadow 150ms ease;
@@ -1039,22 +1081,22 @@ body {
 }
 
 .dark .ai-suggestion {
-  background: rgba(255, 255, 255, 0.1);
-  border-color: rgba(255, 255, 255, 0.18);
-  box-shadow:
-    0 2px 12px rgba(0, 0, 0, 0.15),
-    inset 0 1px 0 rgba(255, 255, 255, 0.1);
+  background: rgba(255, 255, 255, 0.06);
+  color: color-mix(in oklab, #f2f3f5 82%, transparent);
+  box-shadow: 0 1px 8px rgba(0, 0, 0, 0.12);
 }
 
 .ai-suggestion:hover:not(:disabled) {
-  border-color: color-mix(in oklab, #8b5cf6 45%, transparent);
-  background: rgba(255, 255, 255, 0.42);
+  background: rgba(255, 255, 255, 0.78);
+  color: var(--foreground);
   transform: translateY(-1px);
-  box-shadow: 0 4px 14px rgba(99, 102, 241, 0.14);
+  box-shadow: 0 3px 12px rgba(26, 28, 31, 0.07);
 }
 
 .dark .ai-suggestion:hover:not(:disabled) {
-  background: rgba(255, 255, 255, 0.18);
+  background: rgba(255, 255, 255, 0.1);
+  color: #f2f3f5;
+  box-shadow: 0 3px 14px rgba(0, 0, 0, 0.2);
 }
 
 .ai-suggestion:active:not(:disabled) {
@@ -1075,13 +1117,14 @@ body {
 }
 
 .ai-block-card {
-  background: rgba(255, 255, 255, 0.26) !important;
+  background: rgba(255, 255, 255, 0.8) !important;
   backdrop-filter: blur(20px) saturate(1.5);
   -webkit-backdrop-filter: blur(20px) saturate(1.5);
-  border-color: rgba(255, 255, 255, 0.45) !important;
+  border-color: rgba(255, 255, 255, 0.55) !important;
+  color: var(--foreground);
   box-shadow:
-    0 4px 20px rgba(26, 28, 31, 0.05),
-    inset 0 1px 0 rgba(255, 255, 255, 0.5);
+    0 4px 20px rgba(26, 28, 31, 0.06),
+    inset 0 1px 0 rgba(255, 255, 255, 0.6);
   max-width: 100%;
   overflow-wrap: anywhere;
   word-break: break-word;
@@ -1093,22 +1136,22 @@ body {
 }
 
 .dark .ai-block-card {
-  background: rgba(255, 255, 255, 0.1) !important;
+  background: rgba(22, 20, 30, 0.82) !important;
   border-color: rgba(255, 255, 255, 0.16) !important;
   box-shadow:
-    0 6px 24px rgba(0, 0, 0, 0.2),
+    0 6px 24px rgba(0, 0, 0, 0.25),
     inset 0 1px 0 rgba(255, 255, 255, 0.1);
 }
 
 .ai-block-card:hover {
   transform: translateY(-1px);
-  background: rgba(255, 255, 255, 0.38) !important;
+  background: rgba(255, 255, 255, 0.9) !important;
   border-color: color-mix(in oklab, #8b5cf6 35%, transparent) !important;
   box-shadow: 0 8px 22px rgba(99, 102, 241, 0.12);
 }
 
 .dark .ai-block-card:hover {
-  background: rgba(255, 255, 255, 0.16) !important;
+  background: rgba(36, 32, 48, 0.92) !important;
   border-color: rgba(167, 139, 250, 0.35) !important;
 }
 
@@ -1149,6 +1192,16 @@ body {
   font-weight: 600;
   letter-spacing: -0.025em;
   line-height: 1.25;
+  color: var(--foreground);
+}
+
+/* Keep icons/text readable on the colorful shell without changing the background */
+.ai-shell svg {
+  color: inherit;
+}
+
+.ai-shell .text-muted-foreground {
+  color: var(--muted-foreground);
 }
 
 @media (min-width: 768px) {

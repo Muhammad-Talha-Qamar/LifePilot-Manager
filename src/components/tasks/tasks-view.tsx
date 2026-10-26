@@ -122,13 +122,13 @@ export function TasksView() {
   return (
     <div className="mx-auto w-full min-w-0 max-w-3xl space-y-4 sm:space-y-5">
       <header className="animate-fade-up flex flex-wrap items-end justify-between gap-3 sm:gap-4">
-        <div className="min-w-0">
+        <div className="min-w-0 flex-1">
           <h1 className="page-title">Tasks</h1>
           <p className="mt-1 text-sm text-muted-foreground">
             Search, filter, and complete work in one clean list.
           </p>
         </div>
-        <Button onClick={() => setOpen(true)} className="rounded-xl">
+        <Button onClick={() => setOpen(true)} className="w-full shrink-0 rounded-xl sm:w-auto">
           <Plus className="h-4 w-4" /> New task
         </Button>
       </header>
@@ -215,7 +215,7 @@ export function TasksView() {
                   <Button
                     variant="ghost"
                     size="icon"
-                    className="h-9 w-9 shrink-0 text-muted-foreground opacity-70 transition-opacity hover:opacity-100"
+                    className="h-9 w-9 shrink-0 text-foreground/70 hover:text-foreground"
                     aria-label={`Delete ${task.title}`}
                     onClick={() => setConfirmId(task.id)}
                   >
@@ -229,15 +229,16 @@ export function TasksView() {
       </div>
 
       <Dialog open={open} onOpenChange={setOpen}>
-        <DialogContent>
+        <DialogContent className="min-w-0">
           <DialogHeader>
             <DialogTitle>New task</DialogTitle>
           </DialogHeader>
-          <div className="space-y-3">
-            <div>
+          <div className="min-w-0 space-y-3">
+            <div className="min-w-0 space-y-1.5">
               <Label htmlFor="task-title">Title</Label>
               <Input
                 id="task-title"
+                className="w-full min-w-0"
                 value={title}
                 onChange={(e) => setTitle(e.target.value)}
                 onKeyDown={(e) => {
@@ -245,16 +246,16 @@ export function TasksView() {
                 }}
               />
             </div>
-            <div>
+            <div className="min-w-0 space-y-1.5">
               <Label>Priority</Label>
               <Select
                 value={priority}
                 onValueChange={(v) => setPriority(v as Priority)}
               >
-                <SelectTrigger>
+                <SelectTrigger className="w-full min-w-0">
                   <SelectValue />
                 </SelectTrigger>
-                <SelectContent>
+                <SelectContent position="popper" className="z-[60]">
                   <SelectItem value="low">Low</SelectItem>
                   <SelectItem value="medium">Medium</SelectItem>
                   <SelectItem value="high">High</SelectItem>
@@ -262,11 +263,12 @@ export function TasksView() {
                 </SelectContent>
               </Select>
             </div>
-            <div>
+            <div className="min-w-0 space-y-1.5">
               <Label htmlFor="due">Due date</Label>
               <Input
                 id="due"
                 type="date"
+                className="w-full min-w-0"
                 value={dueDate}
                 onChange={(e) => setDueDate(e.target.value)}
               />

@@ -219,7 +219,7 @@ function harness(initial = board()) {
         status: "active" as const,
         priority: "medium" as const,
         start_date: null,
-        deadline: null,
+        deadline: (args.deadline as string | null) ?? null,
         is_archived: false,
         created_at: now.toISOString(),
         updated_at: now.toISOString(),
@@ -228,6 +228,20 @@ function harness(initial = board()) {
       return { success: true, result: project };
     }
     if (name === "create_checklist") {
+      const seedItems = Array.isArray(args.items)
+        ? (args.items as { title: string }[]).map((item, index) => ({
+            id: `55555555-5555-4555-8555-5555555599${index}`,
+            checklist_id: "22222222-2222-4222-8222-222222222299",
+            user_id: "user",
+            title: item.title,
+            is_completed: false,
+            due_date: null,
+            position: index,
+            completed_at: null,
+            created_at: now.toISOString(),
+            updated_at: now.toISOString(),
+          }))
+        : [];
       const checklist = {
         id: "22222222-2222-4222-8222-222222222299",
         user_id: "user",
@@ -239,10 +253,17 @@ function harness(initial = board()) {
         is_archived: false,
         created_at: now.toISOString(),
         updated_at: now.toISOString(),
-        items: [],
+        items: seedItems,
       };
       current.checklists.unshift(checklist);
-      return { success: true, result: { checklist, items: [] } };
+      return { success: true, result: { checklist, items: seedItems } };
+    }
+    if (name === "list_checklists") {
+      return { success: true, result: current.checklists };
+    }
+    if (name === "delete_checklist") {
+      current.checklists = current.checklists.filter((item) => item.id !== args.id);
+      return { success: true, result: { deleted: true, id: args.id } };
     }
     if (name === "add_checklist_items") {
       const checklist = current.checklists.find((item) => item.id === args.checklist_id);
@@ -468,6 +489,74 @@ describe("local assistant commands", () => {
     expect(moved.message).not.toContain("Finish maths homework");
   });
 
+  it("creates checklists with items and adds to an existing list", async () => {
+    const env = harness();
+    const created = await runLocalCommand(
+      "Create a checklist called Groceries with milk and eggs",
+      emptyContext(),
+      env.board,
+      env.act
+    );
+    expect(created.message).toContain("Groceries");
+    expect(created.message).toMatch(/milk/i);
+    expect(created.message).toMatch(/eggs/i);
+    const createCall = env.calls.find((call) => call.name === "create_checklist");
+    expect(createCall?.args.title).toBe("Groceries");
+    expect(createCall?.args.items).toEqual([{ title: "milk" }, { title: "eggs" }]);
+
+    const added = await runLocalCommand(
+      "Add bread to the Groceries checklist",
+      created.context,
+      env.board,
+      env.act
+    );
+    expect(added.message).toMatch(/bread/i);
+    expect(env.calls.at(-1)?.name).toBe("add_checklist_items");
+    expect(env.calls.at(-1)?.args.titles).toEqual(["bread"]);
+  });
+
+  it("shows checklists and deletes them after confirm", async () => {
+    const env = harness();
+    const listed = await runLocalCommand("Show my checklists", emptyContext(), env.board, env.act);
+    expect(listed.message).toContain("Science exam prep");
+    expect(env.calls[0]?.name).toBe("list_checklists");
+
+    const asked = await runLocalCommand(
+      "Delete the Science exam prep checklist",
+      emptyContext(),
+      env.board,
+      env.act
+    );
+    expect(asked.blocks.some((block) => block.type === "confirm")).toBe(true);
+    const confirmed = await runLocalCommand("yes", asked.context, env.board, env.act);
+    expect(confirmed.message.toLowerCase()).toContain("removed");
+    expect(env.calls.some((call) => call.name === "delete_checklist")).toBe(true);
+  });
+
+  it("creates a project with a deadline and moves one task into it", async () => {
+    const env = harness();
+    const created = await runLocalCommand(
+      "Create a project called Midterms with deadline 2026-11-06",
+      emptyContext(),
+      env.board,
+      env.act
+    );
+    expect(created.message).toContain("Midterms");
+    expect(created.message).not.toContain("with deadline 2026-11-06");
+    expect(env.calls[0]?.args.name).toBe("Midterms");
+    expect(env.calls[0]?.args.deadline).toBe("2026-11-06");
+
+    const moved = await runLocalCommand(
+      "Move Finish maths homework into Midterms",
+      created.context,
+      env.board,
+      env.act
+    );
+    expect(moved.message).toContain("Finish maths homework");
+    expect(moved.message).toContain("Midterms");
+    expect(env.calls.at(-1)?.name).toBe("move_tasks_to_project");
+  });
+
   it("saves a timed meeting without claiming it when the time is ambiguous", async () => {
     const env = harness();
     const missingMeridiem = await runLocalCommand(
@@ -507,5 +596,70 @@ describe("local assistant commands", () => {
     });
     expect(result.message).toContain("History Research Project");
     expect(result.message).toContain("Oct 26");
+  });
+
+  it("understands casual create, query, and complete phrasing", async () => {
+    const env = harness();
+
+    const reminded = await runLocalCommand(
+      "remind me to call mom tomorrow",
+      emptyContext(),
+      env.board,
+      env.act
+    );
+    expect(reminded.message).toMatch(/call mom/i);
+    expect(env.calls.some((call) => call.name === "create_task")).toBe(true);
+
+    const bare = await runLocalCommand(
+      "maths worksheet for tomorrow",
+      emptyContext(),
+      env.board,
+      env.act
+    );
+    expect(bare.message).toMatch(/maths worksheet/i);
+    expect(env.calls.filter((call) => call.name === "create_task").length).toBeGreaterThanOrEqual(2);
+
+    const polite = await runLocalCommand(
+      "can you show me what I need to do today?",
+      emptyContext(),
+      env.board,
+      env.act
+    );
+    expect(env.calls.some((call) => call.name === "query_schedule" && call.args.period === "today")).toBe(
+      true
+    );
+    expect(polite.message).toContain("Finish maths homework");
+
+    const shortQuery = await runLocalCommand("today?", emptyContext(), env.board, env.act);
+    expect(shortQuery.message).toContain("Finish maths homework");
+
+    const done = await runLocalCommand(
+      "done with Finish maths homework",
+      emptyContext(),
+      env.board,
+      env.act
+    );
+    expect(done.message).toMatch(/complete/i);
+    expect(env.calls.some((call) => call.name === "complete_task")).toBe(true);
+
+    const need = await runLocalCommand(
+      "I need to submit the lab form by Friday",
+      emptyContext(),
+      env.board,
+      env.act
+    );
+    expect(need.message).toMatch(/lab form/i);
+  });
+
+  it("understands remove as delete and still asks for confirm", async () => {
+    const env = harness();
+    const asked = await runLocalCommand(
+      "remove Finish maths homework",
+      emptyContext(),
+      env.board,
+      env.act
+    );
+    expect(asked.blocks.some((block) => block.type === "confirm")).toBe(true);
+    expect(env.calls).toHaveLength(0);
   });
 });

@@ -18,12 +18,17 @@ npm run lint
 npm run build
 ```
 
-## Demo vs Supabase
+## Sign-in
 
-Without Supabase env vars the app runs in demo mode (in-memory seed data). Optional:
+The app always opens on **Sign in / Create account**. New accounts start with an empty board (no sample tasks or checklists).
+
+Without Supabase env vars, accounts are stored locally on the device (`.demo-users.json` + `.demo-data/`). With Supabase configured, auth and data use your project.
+
+Optional env:
 
 - `NEXT_PUBLIC_SUPABASE_URL`
 - `NEXT_PUBLIC_SUPABASE_ANON_KEY`
+- `LIFEPILOT_SESSION_SECRET` (local account cookies)
 - `OPENAI_API_KEY` (falls back to the local rule-based agent if unset)
 - `OPENAI_MODEL` (default `gpt-4o-mini`)
 

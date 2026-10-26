@@ -9,10 +9,10 @@ import { MessageBlocks } from "./message-blocks";
 import { useAssistant } from "./assistant-provider";
 
 const PROMPTS = [
-  "Plan my day",
   "What should I finish today?",
-  "Organize my upcoming deadlines",
-  "Create a project checklist",
+  "Remind me to call mom tomorrow",
+  "Plan my day",
+  "Create a checklist for groceries with milk and eggs",
 ];
 
 function AssistantText({
@@ -195,10 +195,10 @@ export function AssistantWorkspace() {
         </div>
       </div>
 
-      <div className="shrink-0 px-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] pt-1.5 sm:px-4 sm:pt-2 md:px-6 md:pb-6">
+      <div className="ai-composer-dock relative z-10 shrink-0 px-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] pt-2 sm:px-4 sm:pt-2.5 md:px-6 md:pb-6">
         <form onSubmit={onSubmit} className="mx-auto w-full min-w-0 max-w-[42rem]">
           {!empty && (
-            <div className="mb-2 flex gap-1.5 overflow-x-auto pb-0.5 [-ms-overflow-style:none] [scrollbar-width:none] sm:mb-2.5 sm:gap-2 [&::-webkit-scrollbar]:hidden">
+            <div className="mb-2 flex max-w-full gap-1.5 overflow-x-auto overscroll-x-contain pb-0.5 [-ms-overflow-style:none] [scrollbar-width:none] sm:mb-2.5 sm:gap-2 [&::-webkit-scrollbar]:hidden">
               {PROMPTS.map((prompt) => (
                 <button
                   key={prompt}
@@ -262,13 +262,13 @@ export function AssistantWorkspace() {
             )}
           </div>
 
-          <p className="mt-1.5 px-1 text-center text-[10px] leading-snug text-muted-foreground/80 sm:mt-2 sm:text-[11px]">
+          <p className="mt-1.5 px-1 text-center text-[10px] leading-snug text-muted-foreground sm:mt-2 sm:text-[11px]">
             {busy
               ? "Generating a reply · tap stop to cancel"
               : openaiConfigured
                 ? "Enter to send · Shift+Enter for a new line"
                 : mode === "local"
-                  ? "Simple requests work now · Enter to send"
+                  ? "Say it casually — typos and shortcuts are fine · Enter to send"
                   : "Enter to send · Shift+Enter for a new line"}
           </p>
         </form>

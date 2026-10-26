@@ -1,13 +1,47 @@
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
-import { isSupabaseConfigured } from "@/lib/config";
+import { isDemoMode, isSupabaseConfigured } from "@/lib/config";
+import { SESSION_COOKIE, decodeSession } from "@/lib/auth/session-token";
+
+function isAuthPage(path: string) {
+  return path.startsWith("/login") || path.startsWith("/signup");
+}
+
+function isPublicPath(path: string) {
+  return (
+    isAuthPage(path) ||
+    path.startsWith("/api/health") ||
+    path.startsWith("/api/auth/")
+  );
+}
 
 export async function updateSession(request: NextRequest) {
-  let supabaseResponse = NextResponse.next({ request });
+  const path = request.nextUrl.pathname;
 
-  if (!isSupabaseConfigured()) {
-    return supabaseResponse;
+  // Local / demo auth: gate the app behind the lp_session cookie.
+  if (isDemoMode() || !isSupabaseConfigured()) {
+    const session = await decodeSession(
+      request.cookies.get(SESSION_COOKIE)?.value
+    );
+    const authed = Boolean(session);
+
+    if (!authed && !isPublicPath(path) && !path.startsWith("/api/")) {
+      const url = request.nextUrl.clone();
+      url.pathname = "/login";
+      url.searchParams.set("next", path === "/" ? "/" : path);
+      return NextResponse.redirect(url);
+    }
+
+    if (authed && isAuthPage(path)) {
+      const url = request.nextUrl.clone();
+      url.pathname = "/";
+      return NextResponse.redirect(url);
+    }
+
+    return NextResponse.next({ request });
   }
+
+  let supabaseResponse = NextResponse.next({ request });
 
   const supabase = createServerClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -34,25 +68,16 @@ export async function updateSession(request: NextRequest) {
     data: { user },
   } = await supabase.auth.getUser();
 
-  const path = request.nextUrl.pathname;
-  const isAuthPage =
-    path.startsWith("/login") || path.startsWith("/signup");
-  const isPublic =
-    isAuthPage ||
-    path.startsWith("/api/health") ||
-    path === "/";
-
-  if (!user && !isPublic && !path.startsWith("/api/")) {
-    // Allow app routes in demo mode is handled by isSupabaseConfigured above.
-    // When Supabase is configured, protect app routes.
+  if (!user && !isPublicPath(path) && !path.startsWith("/api/")) {
     const url = request.nextUrl.clone();
     url.pathname = "/login";
+    url.searchParams.set("next", path === "/" ? "/" : path);
     return NextResponse.redirect(url);
   }
 
-  if (user && isAuthPage) {
+  if (user && isAuthPage(path)) {
     const url = request.nextUrl.clone();
-    url.pathname = "/assistant";
+    url.pathname = "/";
     return NextResponse.redirect(url);
   }
 

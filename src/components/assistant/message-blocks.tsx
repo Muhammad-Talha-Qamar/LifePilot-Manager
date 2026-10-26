@@ -35,7 +35,7 @@ function priorityVariant(priority: string): "danger" | "warning" | "secondary" {
 
 export function MessageBlocks({ blocks }: { blocks: AssistantBlock[] }) {
   return (
-    <div className="mt-3.5 space-y-2.5">
+    <div className="mt-3.5 w-full min-w-0 max-w-full space-y-2.5">
       {blocks.map((block, index) => (
         <Block key={`${block.type}-${index}`} block={block} />
       ))}
@@ -47,7 +47,7 @@ function Block({ block }: { block: AssistantBlock }) {
   if (block.type === "tasks") return <TaskList title={block.title} tasks={block.tasks} />;
   if (block.type === "checklists") {
     return (
-      <div className="space-y-2.5">
+      <div className="w-full min-w-0 space-y-2.5">
         {block.checklists.map((checklist) => (
           <ChecklistCard key={checklist.id} checklist={checklist} />
         ))}
@@ -56,7 +56,7 @@ function Block({ block }: { block: AssistantBlock }) {
   }
   if (block.type === "projects") {
     return (
-      <div className="space-y-2.5">
+      <div className="w-full min-w-0 space-y-2.5">
         <p className="text-xs font-medium text-muted-foreground">{block.title}</p>
         {block.projects.map((project) => (
           <ProjectCard key={project.id} project={project} />
@@ -216,8 +216,10 @@ function TaskCard({ task }: { task: TaskCardData }) {
             {task.project_name ? ` · ${task.project_name}` : ""}
           </p>
         </button>
-        <div className="flex shrink-0 flex-col items-end gap-1">
-          <Badge variant={priorityVariant(task.priority)}>{task.priority}</Badge>
+        <div className="flex max-w-[40%] shrink-0 flex-col items-end gap-1">
+          <Badge variant={priorityVariant(task.priority)} className="max-w-full truncate">
+            {task.priority}
+          </Badge>
           {task.overdue && <Badge variant="danger">Overdue</Badge>}
         </div>
       </div>
@@ -305,16 +307,18 @@ function ChecklistCard({ checklist }: { checklist: ChecklistCardData }) {
   }
 
   return (
-    <article className="ai-block-card animate-fade-up min-w-0 overflow-hidden rounded-xl border border-border/70 bg-surface-soft p-3 sm:p-3.5">
-      <div className="flex min-w-0 items-center justify-between gap-3">
-        <div className="min-w-0">
-          <p className="break-words text-sm font-medium">{checklist.title}</p>
-          <p className="text-xs text-muted-foreground">
+    <article className="ai-block-card animate-fade-up box-border w-full min-w-0 max-w-full overflow-hidden rounded-xl border border-border/70 bg-surface-soft p-3 sm:p-3.5">
+      <div className="flex min-w-0 items-start justify-between gap-2 sm:items-center sm:gap-3">
+        <div className="min-w-0 flex-1">
+          <p className="break-words text-sm font-medium [overflow-wrap:anywhere]">{checklist.title}</p>
+          <p className="mt-0.5 break-words text-xs text-muted-foreground [overflow-wrap:anywhere]">
             {done}/{checklist.items.length} complete
             {checklist.project_name ? ` · ${checklist.project_name}` : ""}
           </p>
         </div>
-        <span className="text-sm font-medium text-primary">{percent}%</span>
+        <span className="shrink-0 pt-0.5 text-sm font-medium text-primary tabular-nums">
+          {percent}%
+        </span>
       </div>
       <div className="mt-2.5 h-1.5 overflow-hidden rounded-full bg-muted">
         <div
@@ -324,18 +328,21 @@ function ChecklistCard({ checklist }: { checklist: ChecklistCardData }) {
       </div>
       <ul className="mt-3 space-y-1.5">
         {checklist.items.map((item) => (
-          <li key={item.id} className="list-row flex min-h-10 items-center gap-2.5 rounded-lg px-1 hover:bg-card/50">
+          <li
+            key={item.id}
+            className="list-row flex min-h-10 min-w-0 items-start gap-2.5 rounded-lg px-1 py-1.5 hover:bg-card/50 sm:items-center"
+          >
             <Checkbox
               checked={item.is_completed}
               onCheckedChange={(value) => void toggle(item.id, value === true)}
               aria-label={`${item.is_completed ? "Reopen" : "Complete"} ${item.title}`}
-              className="h-5 w-5"
+              className="mt-0.5 h-5 w-5 shrink-0 sm:mt-0"
             />
             <span
               className={
                 item.is_completed
-                  ? "text-sm text-muted-foreground line-through"
-                  : "text-sm"
+                  ? "min-w-0 flex-1 break-words text-sm text-muted-foreground line-through [overflow-wrap:anywhere]"
+                  : "min-w-0 flex-1 break-words text-sm [overflow-wrap:anywhere]"
               }
             >
               {item.title}
@@ -380,17 +387,19 @@ function ProjectCard({ project }: { project: ProjectCardData }) {
       <button
         type="button"
         onClick={() => setOpen(true)}
-        className="ai-block-card animate-fade-up w-full min-w-0 overflow-hidden rounded-xl border border-border/70 bg-surface-soft p-3 text-left sm:p-3.5"
+        className="ai-block-card animate-fade-up box-border w-full min-w-0 max-w-full overflow-hidden rounded-xl border border-border/70 bg-surface-soft p-3 text-left sm:p-3.5"
       >
-        <div className="flex items-start justify-between gap-3">
-          <div>
-            <p className="text-sm font-medium">{project.name}</p>
-            <p className="mt-0.5 text-xs text-muted-foreground">
+        <div className="flex min-w-0 items-start justify-between gap-2 sm:gap-3">
+          <div className="min-w-0 flex-1">
+            <p className="break-words text-sm font-medium [overflow-wrap:anywhere]">{project.name}</p>
+            <p className="mt-0.5 break-words text-xs text-muted-foreground [overflow-wrap:anywhere]">
               {project.deadline ? `Deadline ${formatDateOnly(project.deadline)}` : "No deadline"} ·{" "}
               {project.status}
             </p>
           </div>
-          <Badge variant={priorityVariant(project.priority)}>{project.progress_percent}%</Badge>
+          <Badge variant={priorityVariant(project.priority)} className="shrink-0">
+            {project.progress_percent}%
+          </Badge>
         </div>
         <div className="mt-2.5 h-1.5 overflow-hidden rounded-full bg-muted">
           <div
@@ -401,7 +410,7 @@ function ProjectCard({ project }: { project: ProjectCardData }) {
         {project.tasks.length > 0 && (
           <ul className="mt-2.5 space-y-1 text-xs text-muted-foreground">
             {project.tasks.slice(0, 4).map((task) => (
-              <li key={task.id}>
+              <li key={task.id} className="min-w-0 break-words [overflow-wrap:anywhere]">
                 {task.title}
                 {task.due_date ? ` · ${formatDateOnly(task.due_date)}` : ""}
               </li>
@@ -456,16 +465,23 @@ function ConfirmBlock({
 }) {
   const { confirm, dismissPending, busy } = useAssistant();
   return (
-    <div className="ai-block-card animate-scale-in rounded-xl border border-border/80 bg-surface-soft p-3.5">
-      <p className="text-sm">{prompt}</p>
-      <div className="mt-3 flex flex-wrap gap-2">
-        <Button type="button" size="sm" disabled={busy} onClick={() => void confirm(action)}>
+    <div className="ai-block-card animate-scale-in box-border w-full min-w-0 max-w-full overflow-hidden rounded-xl border border-border/80 bg-surface-soft p-3 sm:p-3.5">
+      <p className="break-words text-sm [overflow-wrap:anywhere]">{prompt}</p>
+      <div className="mt-3 flex flex-col gap-2 sm:flex-row sm:flex-wrap">
+        <Button
+          type="button"
+          size="sm"
+          className="w-full sm:w-auto"
+          disabled={busy}
+          onClick={() => void confirm(action)}
+        >
           Confirm delete
         </Button>
         <Button
           type="button"
           size="sm"
           variant="outline"
+          className="w-full sm:w-auto"
           disabled={busy}
           onClick={() => void dismissPending()}
         >

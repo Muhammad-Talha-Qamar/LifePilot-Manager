@@ -10,6 +10,7 @@ import type {
   ChecklistItem,
   ProductivityPreferences,
   ProductivitySummary,
+  Profile,
   Project,
   Reminder,
   Task,
@@ -45,7 +46,7 @@ export async function listTasks(
 
   let tasks: Task[];
   if (ctx.isDemo || isDemoMode()) {
-    const store = await getDemoStore();
+    const store = await getDemoStore(ctx.userId);
     tasks = store.tasks.filter((t) => t.user_id === ctx.userId);
   } else {
     const client = await sb();
@@ -94,7 +95,7 @@ export async function listTasks(
 export async function getTask(id: string, auth?: AuthContext): Promise<Task> {
   const ctx = auth ?? (await requireAuth());
   if (ctx.isDemo || isDemoMode()) {
-    const store = await getDemoStore();
+    const store = await getDemoStore(ctx.userId);
     const task = store.tasks.find((t) => t.id === id && t.user_id === ctx.userId);
     if (!task) throw new NotFoundError("Task not found");
     return task;
@@ -136,7 +137,7 @@ export async function createTask(
   };
 
   if (ctx.isDemo || isDemoMode()) {
-    await mutateDemoStore((store) => {
+    await mutateDemoStore(ctx.userId, (store) => {
       store.tasks.unshift(task);
     });
     return task;
@@ -170,7 +171,7 @@ export async function updateTask(
   }
 
   if (ctx.isDemo || isDemoMode()) {
-    await mutateDemoStore((store) => {
+    await mutateDemoStore(ctx.userId, (store) => {
       const idx = store.tasks.findIndex((t) => t.id === id && t.user_id === ctx.userId);
       if (idx === -1) throw new NotFoundError("Task not found");
       store.tasks[idx] = updated;
@@ -209,7 +210,7 @@ export async function deleteTask(id: string, auth?: AuthContext): Promise<void> 
   await getTask(id, ctx);
 
   if (ctx.isDemo || isDemoMode()) {
-    await mutateDemoStore((store) => {
+    await mutateDemoStore(ctx.userId, (store) => {
       store.tasks = store.tasks.filter((t) => !(t.id === id && t.user_id === ctx.userId));
     });
     return;
@@ -233,7 +234,7 @@ export async function completeTask(id: string, auth?: AuthContext): Promise<Task
 export async function listChecklists(auth?: AuthContext): Promise<Checklist[]> {
   const ctx = auth ?? (await requireAuth());
   if (ctx.isDemo || isDemoMode()) {
-    const store = await getDemoStore();
+    const store = await getDemoStore(ctx.userId);
     return store.checklists.filter((c) => c.user_id === ctx.userId && !c.is_archived);
   }
   const client = await sb();
@@ -253,7 +254,7 @@ export async function getChecklistItems(
 ): Promise<ChecklistItem[]> {
   const ctx = auth ?? (await requireAuth());
   if (ctx.isDemo || isDemoMode()) {
-    const store = await getDemoStore();
+    const store = await getDemoStore(ctx.userId);
     return store.checklist_items
       .filter((i) => i.checklist_id === checklistId && i.user_id === ctx.userId)
       .sort((a, b) => a.position - b.position);
@@ -308,7 +309,7 @@ export async function createChecklist(
   }));
 
   if (ctx.isDemo || isDemoMode()) {
-    await mutateDemoStore((store) => {
+    await mutateDemoStore(ctx.userId, (store) => {
       store.checklists.unshift(checklist);
       store.checklist_items.push(...items);
     });
@@ -339,7 +340,7 @@ export async function updateChecklist(
 
   if (ctx.isDemo || isDemoMode()) {
     let updated: Checklist | null = null;
-    await mutateDemoStore((store) => {
+    await mutateDemoStore(ctx.userId, (store) => {
       const idx = store.checklists.findIndex(
         (c) => c.id === id && c.user_id === ctx.userId
       );
@@ -371,7 +372,7 @@ export async function updateChecklist(
 export async function deleteChecklist(id: string, auth?: AuthContext): Promise<void> {
   const ctx = auth ?? (await requireAuth());
   if (ctx.isDemo || isDemoMode()) {
-    await mutateDemoStore((store) => {
+    await mutateDemoStore(ctx.userId, (store) => {
       store.checklists = store.checklists.filter(
         (c) => !(c.id === id && c.user_id === ctx.userId)
       );
@@ -414,7 +415,7 @@ export async function manageChecklistItem(
 
   if (ctx.isDemo || isDemoMode()) {
     let result: ChecklistItem | ChecklistItem[] | null = null;
-    await mutateDemoStore((store) => {
+    await mutateDemoStore(ctx.userId, (store) => {
       const cl = store.checklists.find(
         (c) => c.id === input.checklist_id && c.user_id === ctx.userId
       );
@@ -575,7 +576,7 @@ export async function manageChecklistItem(
 export async function listProjects(auth?: AuthContext): Promise<Project[]> {
   const ctx = auth ?? (await requireAuth());
   if (ctx.isDemo || isDemoMode()) {
-    const store = await getDemoStore();
+    const store = await getDemoStore(ctx.userId);
     return store.projects.filter((p) => p.user_id === ctx.userId && !p.is_archived);
   }
   const client = await sb();
@@ -610,7 +611,7 @@ export async function createProject(
   };
 
   if (ctx.isDemo || isDemoMode()) {
-    await mutateDemoStore((store) => {
+    await mutateDemoStore(ctx.userId, (store) => {
       store.projects.unshift(project);
     });
     return project;
@@ -632,7 +633,7 @@ export async function updateProject(
 
   if (ctx.isDemo || isDemoMode()) {
     let updated: Project | null = null;
-    await mutateDemoStore((store) => {
+    await mutateDemoStore(ctx.userId, (store) => {
       const idx = store.projects.findIndex(
         (p) => p.id === id && p.user_id === ctx.userId
       );
@@ -664,7 +665,7 @@ export async function updateProject(
 export async function deleteProject(id: string, auth?: AuthContext): Promise<void> {
   const ctx = auth ?? (await requireAuth());
   if (ctx.isDemo || isDemoMode()) {
-    await mutateDemoStore((store) => {
+    await mutateDemoStore(ctx.userId, (store) => {
       store.projects = store.projects.filter(
         (p) => !(p.id === id && p.user_id === ctx.userId)
       );
@@ -696,7 +697,7 @@ export async function listEvents(
   let events: CalendarEvent[];
 
   if (ctx.isDemo || isDemoMode()) {
-    const store = await getDemoStore();
+    const store = await getDemoStore(ctx.userId);
     events = store.events.filter((e) => e.user_id === ctx.userId);
   } else {
     const client = await sb();
@@ -752,7 +753,7 @@ export async function createEvent(
   };
 
   if (ctx.isDemo || isDemoMode()) {
-    await mutateDemoStore((store) => {
+    await mutateDemoStore(ctx.userId, (store) => {
       store.events.push(event);
       store.events.sort((a, b) => a.start_at.localeCompare(b.start_at));
     });
@@ -779,7 +780,7 @@ export async function updateEvent(
 
   if (ctx.isDemo || isDemoMode()) {
     let updated: CalendarEvent | null = null;
-    await mutateDemoStore((store) => {
+    await mutateDemoStore(ctx.userId, (store) => {
       const idx = store.events.findIndex(
         (e) => e.id === id && e.user_id === ctx.userId
       );
@@ -815,7 +816,7 @@ export async function updateEvent(
 export async function deleteEvent(id: string, auth?: AuthContext): Promise<void> {
   const ctx = auth ?? (await requireAuth());
   if (ctx.isDemo || isDemoMode()) {
-    await mutateDemoStore((store) => {
+    await mutateDemoStore(ctx.userId, (store) => {
       store.events = store.events.filter(
         (e) => !(e.id === id && e.user_id === ctx.userId)
       );
@@ -838,7 +839,7 @@ export async function getPreferences(
 ): Promise<ProductivityPreferences> {
   const ctx = auth ?? (await requireAuth());
   if (ctx.isDemo || isDemoMode()) {
-    const store = await getDemoStore();
+    const store = await getDemoStore(ctx.userId);
     return store.preferences;
   }
   const client = await sb();
@@ -881,7 +882,7 @@ export async function savePreferences(
   };
 
   if (ctx.isDemo || isDemoMode()) {
-    await mutateDemoStore((store) => {
+    await mutateDemoStore(ctx.userId, (store) => {
       store.preferences = updated;
       if (patch.timezone) {
         store.profile.timezone = patch.timezone;
@@ -903,7 +904,7 @@ export async function savePreferences(
 export async function listReminders(auth?: AuthContext): Promise<Reminder[]> {
   const ctx = auth ?? (await requireAuth());
   if (ctx.isDemo || isDemoMode()) {
-    const store = await getDemoStore();
+    const store = await getDemoStore(ctx.userId);
     return store.reminders
       .filter((r) => r.user_id === ctx.userId)
       .sort((a, b) => b.remind_at.localeCompare(a.remind_at));
@@ -925,7 +926,7 @@ export async function markReminderRead(
   const ctx = auth ?? (await requireAuth());
   if (ctx.isDemo || isDemoMode()) {
     let updated: Reminder | null = null;
-    await mutateDemoStore((store) => {
+    await mutateDemoStore(ctx.userId, (store) => {
       const idx = store.reminders.findIndex(
         (r) => r.id === id && r.user_id === ctx.userId
       );
@@ -994,7 +995,7 @@ export async function createReminderFromDueItems(
     };
 
     if (ctx.isDemo || isDemoMode()) {
-      await mutateDemoStore((store) => {
+      await mutateDemoStore(ctx.userId, (store) => {
         store.reminders.unshift(reminder);
       });
     } else {
@@ -1069,4 +1070,33 @@ export async function getProductivitySummary(
     completion_rate_7d,
     unread_reminders: reminders.filter((r) => !r.is_read).length,
   };
+}
+
+export async function updateProfileAvatar(
+  avatarUrl: string | null,
+  auth?: AuthContext
+): Promise<Profile> {
+  const ctx = auth ?? (await requireAuth());
+  const updatedAt = nowIso();
+
+  if (ctx.isDemo || isDemoMode()) {
+    const store = await mutateDemoStore(ctx.userId, (demo) => {
+      demo.profile.avatar_url = avatarUrl;
+      demo.profile.updated_at = updatedAt;
+    });
+    return {
+      ...store.profile,
+      created_at: ctx.profile.created_at || store.profile.created_at,
+    };
+  }
+
+  const client = await sb();
+  const { data, error } = await client
+    .from("profiles")
+    .update({ avatar_url: avatarUrl, updated_at: updatedAt })
+    .eq("id", ctx.userId)
+    .select("*")
+    .single();
+  if (error) throw error;
+  return data as Profile;
 }

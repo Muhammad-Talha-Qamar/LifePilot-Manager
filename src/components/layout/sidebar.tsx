@@ -12,11 +12,13 @@ import {
   MessageSquare,
   PanelLeftClose,
   PanelLeftOpen,
+  LogOut,
   Plus,
   Settings,
   X,
 } from "lucide-react";
 import { useEffect, useState } from "react";
+import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { useAssistant } from "@/components/assistant/assistant-provider";
@@ -55,12 +57,27 @@ function isActive(pathname: string, href: string, match?: string[]) {
   return pathname === href || pathname.startsWith(`${href}/`);
 }
 
-export function Sidebar({ isDemo }: { isDemo: boolean }) {
+export function Sidebar({
+  isDemo,
+  user,
+}: {
+  isDemo: boolean;
+  user: { email: string; fullName: string | null; avatarUrl: string | null };
+}) {
   const pathname = usePathname();
   const router = useRouter();
   const { clearChat, busy } = useAssistant();
   const [open, setOpen] = useState(false);
   const [collapsed, setCollapsed] = useState(false);
+  const [signingOut, setSigningOut] = useState(false);
+
+  const displayName = user.fullName?.trim() || user.email.split("@")[0] || "You";
+  const initials = displayName
+    .split(/\s+/)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((part) => part[0]?.toUpperCase() ?? "")
+    .join("") || "You";
 
   useEffect(() => {
     setOpen(false);
@@ -71,6 +88,21 @@ export function Sidebar({ isDemo }: { isDemo: boolean }) {
     setOpen(false);
     if (pathname !== "/" && pathname !== "/assistant") {
       router.push("/");
+    }
+  }
+
+  async function handleSignOut() {
+    if (signingOut) return;
+    setSigningOut(true);
+    try {
+      await fetch("/api/auth/logout", { method: "POST" });
+      clearChat();
+      router.replace("/login");
+      router.refresh();
+    } catch {
+      toast.error("Could not sign out");
+    } finally {
+      setSigningOut(false);
     }
   }
 
@@ -96,14 +128,16 @@ export function Sidebar({ isDemo }: { isDemo: boolean }) {
               compact && "justify-center px-0",
               active
                 ? "lp-nav-link-active"
-                : "text-muted-foreground hover:bg-white/15 hover:text-foreground dark:hover:bg-white/10"
+                : "text-foreground/75 hover:bg-white/40 hover:text-foreground dark:hover:bg-white/10"
             )}
             aria-current={active ? "page" : undefined}
           >
             <Icon
               className={cn(
-                "h-[18px] w-[18px] shrink-0 opacity-90 transition-transform duration-200",
-                active && "scale-105 text-violet-500 dark:text-violet-300"
+                "h-[18px] w-[18px] shrink-0 transition-transform duration-200",
+                active
+                  ? "scale-105 text-violet-600 dark:text-violet-300"
+                  : "text-foreground/80"
               )}
             />
             {!compact && <span>{item.label}</span>}
@@ -114,7 +148,7 @@ export function Sidebar({ isDemo }: { isDemo: boolean }) {
   );
 
   const sidebarBody = (
-    <>
+    <div className="flex min-h-0 flex-1 flex-col overflow-y-auto overscroll-contain">
       <div
         className={cn(
           "flex h-14 shrink-0 items-center gap-2 px-3",
@@ -125,7 +159,7 @@ export function Sidebar({ isDemo }: { isDemo: boolean }) {
         <Button
           variant="ghost"
           size="icon"
-          className="hidden h-8 w-8 text-muted-foreground md:inline-flex"
+          className="hidden h-8 w-8 text-foreground/80 md:inline-flex"
           aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
           onClick={() => setCollapsed((c) => !c)}
         >
@@ -151,20 +185,20 @@ export function Sidebar({ isDemo }: { isDemo: boolean }) {
         </Button>
       </div>
 
-      <div className={cn("min-h-0 flex-1 overflow-y-auto overscroll-contain px-3", collapsed && "px-2")}>
+      <div className={cn("px-3 pb-2", collapsed && "px-2")}>
         <NavLinks onNavigate={() => setOpen(false)} compact={collapsed} />
       </div>
 
       <div
         className={cn(
-          "lp-nav-footer shrink-0 space-y-1 p-3",
+          "lp-nav-footer mt-auto space-y-1 p-3",
           collapsed && "px-2"
         )}
       >
         {isDemo && !collapsed && (
           <div className="lp-nav-demo mb-1 hidden rounded-xl px-3 py-2 text-xs text-muted-foreground sm:block">
-            <p className="font-medium text-foreground">Demo mode</p>
-            <p className="mt-0.5">Data stays on this device.</p>
+            <p className="font-medium text-foreground">Local account</p>
+            <p className="mt-0.5">Starts empty. Data stays on this device.</p>
           </div>
         )}
         <Link
@@ -176,7 +210,7 @@ export function Sidebar({ isDemo }: { isDemo: boolean }) {
             collapsed && "justify-center px-0",
             pathname.startsWith("/settings")
               ? "lp-nav-link-active"
-              : "text-muted-foreground hover:bg-white/15 hover:text-foreground dark:hover:bg-white/10"
+              : "text-foreground/75 hover:bg-white/40 hover:text-foreground dark:hover:bg-white/10"
           )}
           aria-current={pathname.startsWith("/settings") ? "page" : undefined}
         >
@@ -184,19 +218,51 @@ export function Sidebar({ isDemo }: { isDemo: boolean }) {
           {!collapsed && <span>Settings</span>}
         </Link>
         <ThemeToggle collapsed={collapsed} />
-        {!collapsed && (
-          <div className="hidden items-center gap-3 rounded-xl px-3 py-2 text-sm text-muted-foreground md:flex">
-            <span className="lp-nav-avatar flex h-8 w-8 items-center justify-center rounded-full text-xs font-semibold transition-transform duration-200 hover:scale-105">
-              You
-            </span>
+        <button
+          type="button"
+          onClick={() => void handleSignOut()}
+          disabled={signingOut}
+          title={collapsed ? "Sign out" : undefined}
+          className={cn(
+            "nav-link flex min-h-10 w-full items-center gap-3 rounded-xl px-3 text-sm font-medium text-foreground/75 hover:bg-white/40 hover:text-foreground dark:hover:bg-white/10",
+            collapsed && "justify-center px-0"
+          )}
+        >
+          <LogOut className="h-[18px] w-[18px] shrink-0" />
+          {!collapsed && <span>{signingOut ? "Signing out…" : "Sign out"}</span>}
+        </button>
+        <Link
+          href="/profile"
+          onClick={() => setOpen(false)}
+          title={collapsed ? displayName : undefined}
+          className={cn(
+            "nav-link group flex min-h-10 items-center gap-3 rounded-xl px-3 text-sm text-foreground/80 hover:bg-white/40 hover:text-foreground dark:hover:bg-white/10",
+            collapsed && "justify-center px-0",
+            pathname.startsWith("/profile") && "lp-nav-link-active"
+          )}
+          aria-current={pathname.startsWith("/profile") ? "page" : undefined}
+        >
+          <span className="lp-nav-avatar relative flex h-8 w-8 shrink-0 items-center justify-center overflow-hidden rounded-full text-xs font-semibold text-white transition-transform duration-200 group-hover:scale-105">
+            {user.avatarUrl ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img
+                src={user.avatarUrl}
+                alt=""
+                className="h-full w-full object-cover"
+              />
+            ) : (
+              initials
+            )}
+          </span>
+          {!collapsed && (
             <div className="min-w-0">
-              <p className="truncate font-medium text-foreground">Guest</p>
-              <p className="truncate text-xs">Sign in when auth is set up</p>
+              <p className="truncate font-medium text-foreground">{displayName}</p>
+              <p className="truncate text-xs text-muted-foreground">{user.email}</p>
             </div>
-          </div>
-        )}
+          )}
+        </Link>
       </div>
-    </>
+    </div>
   );
 
   return (
@@ -230,7 +296,7 @@ export function Sidebar({ isDemo }: { isDemo: boolean }) {
 
       <aside
         className={cn(
-          "lp-nav-aside lp-nav-aside--ai fixed inset-y-0 left-0 z-[60] flex h-dvh max-h-dvh w-[min(17.5rem,88vw)] max-w-[17.5rem] flex-col overflow-hidden transition-[transform,width] duration-200 ease-out md:static md:z-[1] md:h-auto md:max-h-none md:w-[15.25rem] md:max-w-none",
+          "lp-nav-aside lp-nav-aside--ai fixed inset-y-0 left-0 z-[60] flex h-dvh max-h-dvh w-[min(17.5rem,88vw)] max-w-[17.5rem] flex-col overflow-hidden transition-[transform,width] duration-200 ease-out md:static md:z-[1] md:h-dvh md:max-h-dvh md:w-[15.25rem] md:max-w-none md:shrink-0",
           collapsed && "md:!w-[4.5rem]",
           // Keep sidebar interactive on desktop; only hide off-canvas drawer on small screens
           open ? "translate-x-0" : "max-md:-translate-x-full",
