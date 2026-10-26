@@ -7,9 +7,21 @@ function isAuthPage(path: string) {
   return path.startsWith("/login") || path.startsWith("/signup");
 }
 
+function isIconAsset(path: string) {
+  return (
+    path === "/favicon.ico" ||
+    path === "/icon" ||
+    path === "/apple-icon" ||
+    path.startsWith("/icon.") ||
+    path.startsWith("/apple-icon.") ||
+    path.startsWith("/favicon.")
+  );
+}
+
 function isPublicPath(path: string) {
   return (
     isAuthPage(path) ||
+    isIconAsset(path) ||
     path.startsWith("/api/health") ||
     path.startsWith("/api/auth/")
   );

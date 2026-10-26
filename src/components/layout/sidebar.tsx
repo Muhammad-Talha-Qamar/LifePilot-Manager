@@ -126,15 +126,13 @@ export function Sidebar({
             className={cn(
               "nav-link group flex min-h-10 items-center gap-3 rounded-xl px-3 text-sm font-medium",
               compact && "justify-center px-0",
-              active
-                ? "lp-nav-link-active"
-                : "text-foreground/75 hover:bg-white/40 hover:text-foreground dark:hover:bg-white/10"
+              active ? "lp-nav-link-active" : "text-foreground/75"
             )}
             aria-current={active ? "page" : undefined}
           >
             <Icon
               className={cn(
-                "h-[18px] w-[18px] shrink-0 transition-transform duration-200",
+                "h-[18px] w-[18px] shrink-0",
                 active
                   ? "scale-105 text-violet-600 dark:text-violet-300"
                   : "text-foreground/80"
@@ -206,25 +204,25 @@ export function Sidebar({
           onClick={() => setOpen(false)}
           title={collapsed ? "Settings" : undefined}
           className={cn(
-            "nav-link flex min-h-10 items-center gap-3 rounded-xl px-3 text-sm font-medium",
+            "nav-link group flex min-h-10 items-center gap-3 rounded-xl px-3 text-sm font-medium",
             collapsed && "justify-center px-0",
             pathname.startsWith("/settings")
               ? "lp-nav-link-active"
-              : "text-foreground/75 hover:bg-white/40 hover:text-foreground dark:hover:bg-white/10"
+              : "text-foreground/75"
           )}
           aria-current={pathname.startsWith("/settings") ? "page" : undefined}
         >
           <Settings className="h-[18px] w-[18px] shrink-0" />
           {!collapsed && <span>Settings</span>}
         </Link>
-        <ThemeToggle collapsed={collapsed} />
+        <ThemeToggle collapsed={collapsed} className="nav-link group text-foreground/75" />
         <button
           type="button"
           onClick={() => void handleSignOut()}
           disabled={signingOut}
           title={collapsed ? "Sign out" : undefined}
           className={cn(
-            "nav-link flex min-h-10 w-full items-center gap-3 rounded-xl px-3 text-sm font-medium text-foreground/75 hover:bg-white/40 hover:text-foreground dark:hover:bg-white/10",
+            "nav-link group flex min-h-10 w-full items-center gap-3 rounded-xl px-3 text-sm font-medium text-foreground/75",
             collapsed && "justify-center px-0"
           )}
         >
@@ -236,13 +234,13 @@ export function Sidebar({
           onClick={() => setOpen(false)}
           title={collapsed ? displayName : undefined}
           className={cn(
-            "nav-link group flex min-h-10 items-center gap-3 rounded-xl px-3 text-sm text-foreground/80 hover:bg-white/40 hover:text-foreground dark:hover:bg-white/10",
+            "nav-link lp-nav-profile group flex min-h-10 items-center gap-3 rounded-xl px-3 text-sm text-foreground/80",
             collapsed && "justify-center px-0",
             pathname.startsWith("/profile") && "lp-nav-link-active"
           )}
           aria-current={pathname.startsWith("/profile") ? "page" : undefined}
         >
-          <span className="lp-nav-avatar relative flex h-8 w-8 shrink-0 items-center justify-center overflow-hidden rounded-full text-xs font-semibold text-white transition-transform duration-200 group-hover:scale-105">
+          <span className="lp-nav-avatar relative flex h-8 w-8 shrink-0 items-center justify-center overflow-hidden rounded-full text-xs font-semibold text-white">
             {user.avatarUrl ? (
               // eslint-disable-next-line @next/next/no-img-element
               <img

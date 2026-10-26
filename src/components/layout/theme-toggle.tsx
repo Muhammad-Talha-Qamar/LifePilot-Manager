@@ -28,7 +28,7 @@ export function ThemeToggle({
       variant="ghost"
       size={collapsed ? "icon" : "default"}
       className={cn(
-        "h-10 w-full justify-start gap-3 rounded-xl text-foreground/80 hover:text-foreground",
+        "h-10 w-full justify-start gap-3 rounded-xl text-foreground/80 hover:bg-transparent hover:text-foreground",
         collapsed && "justify-center px-0",
         className
       )}

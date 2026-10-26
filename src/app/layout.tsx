@@ -21,6 +21,15 @@ export const metadata: Metadata = {
   description:
     "AI-powered personal productivity: tasks, checklists, calendar, projects, and an intelligent assistant.",
   applicationName: "LifePilot",
+  icons: {
+    icon: [
+      { url: "/favicon.ico", sizes: "any" },
+      { url: "/icon.svg", type: "image/svg+xml" },
+      { url: "/favicon.svg", type: "image/svg+xml" },
+    ],
+    shortcut: "/favicon.ico",
+    apple: [{ url: "/apple-touch-icon.png", sizes: "180x180" }],
+  },
 };
 
 export const viewport: Viewport = {
