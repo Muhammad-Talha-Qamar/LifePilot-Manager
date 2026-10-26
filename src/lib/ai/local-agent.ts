@@ -1225,7 +1225,7 @@ async function createChecklistCommand(
   let projectId: string | null = null;
   const parsed = extractChecklistTitleAndItems(raw);
   let title = parsed.title;
-  let items = parsed.items;
+  const items = parsed.items;
 
   if (/\bto it\b|\bto that\b|\bfor it\b/.test(norm) && context.lastProject) {
     const project = board.projects.find((item) => item.id === context.lastProject?.id);

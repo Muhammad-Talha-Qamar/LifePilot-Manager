@@ -1,4 +1,3 @@
-import { NextResponse } from "next/server";
 import { isDemoMode, isSupabaseConfigured } from "@/lib/config";
 import { clearSessionCookie } from "@/lib/auth/session";
 import { jsonOk } from "@/lib/api";
