@@ -1,9 +1,10 @@
 import { randomBytes, scryptSync, timingSafeEqual } from "crypto";
-import { promises as fs } from "fs";
 import path from "path";
 import { generateId, nowIso } from "@/lib/utils";
+import { readJsonText, writeJsonText } from "./persist";
 
 const USERS_PATH = path.join(process.cwd(), ".demo-users.json");
+const USERS_KEY = "users";
 
 export interface DemoUserRecord {
   id: string;
@@ -16,18 +17,6 @@ export interface DemoUserRecord {
 
 interface DemoUsersFile {
   users: DemoUserRecord[];
-}
-
-type GlobalUsers = {
-  writeQueue: Promise<void>;
-};
-
-function globals(): GlobalUsers {
-  const g = globalThis as typeof globalThis & { __lpDemoUsers?: GlobalUsers };
-  if (!g.__lpDemoUsers) {
-    g.__lpDemoUsers = { writeQueue: Promise.resolve() };
-  }
-  return g.__lpDemoUsers;
 }
 
 function normalizeEmail(email: string): string {
@@ -50,7 +39,8 @@ export function verifyPassword(
 
 async function readUsers(): Promise<DemoUsersFile> {
   try {
-    const raw = await fs.readFile(USERS_PATH, "utf8");
+    const raw = await readJsonText(USERS_KEY, USERS_PATH);
+    if (!raw) return { users: [] };
     const parsed = JSON.parse(raw) as DemoUsersFile;
     if (!Array.isArray(parsed.users)) return { users: [] };
     return parsed;
@@ -60,11 +50,7 @@ async function readUsers(): Promise<DemoUsersFile> {
 }
 
 async function writeUsers(file: DemoUsersFile): Promise<void> {
-  const g = globals();
-  g.writeQueue = g.writeQueue.then(async () => {
-    await fs.writeFile(USERS_PATH, JSON.stringify(file, null, 2), "utf8");
-  });
-  await g.writeQueue;
+  await writeJsonText(USERS_KEY, USERS_PATH, JSON.stringify(file, null, 2));
 }
 
 export async function findDemoUserByEmail(

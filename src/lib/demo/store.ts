@@ -1,12 +1,11 @@
-import { promises as fs } from "fs";
 import path from "path";
 import { createEmptyStore, createSeedStore, type DemoStore } from "./seed";
+import { readJsonText, writeJsonText } from "./persist";
 
 const DATA_DIR = path.join(process.cwd(), ".demo-data");
 
 type GlobalStore = {
   memoryByUser: Map<string, DemoStore>;
-  writeQueue: Promise<void>;
 };
 
 function globals(): GlobalStore {
@@ -14,10 +13,14 @@ function globals(): GlobalStore {
   if (!g.__lpDemoStore) {
     g.__lpDemoStore = {
       memoryByUser: new Map(),
-      writeQueue: Promise.resolve(),
     };
   }
   return g.__lpDemoStore;
+}
+
+function storeKey(userId: string): string {
+  const safe = userId.replace(/[^a-zA-Z0-9_-]/g, "_");
+  return `user:${safe}`;
 }
 
 function storePath(userId: string): string {
@@ -25,13 +28,10 @@ function storePath(userId: string): string {
   return path.join(DATA_DIR, `${safe}.json`);
 }
 
-async function ensureDir(): Promise<void> {
-  await fs.mkdir(DATA_DIR, { recursive: true });
-}
-
 async function readFromDisk(userId: string): Promise<DemoStore | null> {
+  const raw = await readJsonText(storeKey(userId), storePath(userId));
+  if (!raw) return null;
   try {
-    const raw = await fs.readFile(storePath(userId), "utf8");
     return JSON.parse(raw) as DemoStore;
   } catch {
     return null;
@@ -39,12 +39,11 @@ async function readFromDisk(userId: string): Promise<DemoStore | null> {
 }
 
 async function writeToDisk(userId: string, store: DemoStore): Promise<void> {
-  const g = globals();
-  g.writeQueue = g.writeQueue.then(async () => {
-    await ensureDir();
-    await fs.writeFile(storePath(userId), JSON.stringify(store, null, 2), "utf8");
-  });
-  await g.writeQueue;
+  await writeJsonText(
+    storeKey(userId),
+    storePath(userId),
+    JSON.stringify(store, null, 2)
+  );
 }
 
 export async function getDemoStore(
@@ -52,7 +51,7 @@ export async function getDemoStore(
   profile?: { email: string; fullName?: string | null }
 ): Promise<DemoStore> {
   const g = globals();
-  // Prefer disk so HMR / split module instances stay consistent.
+  // Prefer disk/blobs so HMR / split module instances stay consistent.
   const disk = await readFromDisk(userId);
   if (disk) {
     g.memoryByUser.set(userId, disk);

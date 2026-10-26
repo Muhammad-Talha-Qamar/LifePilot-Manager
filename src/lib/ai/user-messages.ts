@@ -41,6 +41,11 @@ const PATTERNS: { test: RegExp; message: string }[] = [
     message: "The service ran into a problem and couldn't finish your request. Please try again in a moment.",
   },
   {
+    test: /EROFS|EACCES|read-?only file system/i,
+    message:
+      "This hosted site can't save demo data to disk. Actions should work after the latest deploy; for lasting accounts, add Supabase env vars on Netlify.",
+  },
+  {
     test: /database|postgres|supabase|query failed|PGRST|relation |column /i,
     message: "I couldn't retrieve or save your information, so I haven't completed your request yet.",
   },
