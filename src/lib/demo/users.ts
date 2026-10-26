@@ -2,6 +2,11 @@ import { randomBytes, scryptSync, timingSafeEqual } from "crypto";
 import path from "path";
 import { generateId, nowIso } from "@/lib/utils";
 import { readJsonText, writeJsonText } from "./persist";
+import {
+  encodeRosterCookie,
+  readRosterCookie,
+  setRosterCookie,
+} from "./roster-cookie";
 
 const USERS_PATH = path.join(process.cwd(), ".demo-users.json");
 const USERS_KEY = "users";
@@ -37,20 +42,46 @@ export function verifyPassword(
   return timingSafeEqual(Buffer.from(next), Buffer.from(passwordHash));
 }
 
-async function readUsers(): Promise<DemoUsersFile> {
-  try {
-    const raw = await readJsonText(USERS_KEY, USERS_PATH);
-    if (!raw) return { users: [] };
-    const parsed = JSON.parse(raw) as DemoUsersFile;
-    if (!Array.isArray(parsed.users)) return { users: [] };
-    return parsed;
-  } catch {
-    return { users: [] };
-  }
+function mergeUsers(
+  primary: DemoUserRecord[],
+  secondary: DemoUserRecord[]
+): DemoUserRecord[] {
+  const byId = new Map<string, DemoUserRecord>();
+  for (const user of secondary) byId.set(user.id, user);
+  for (const user of primary) byId.set(user.id, user);
+  return [...byId.values()];
 }
 
-async function writeUsers(file: DemoUsersFile): Promise<void> {
+async function readUsers(): Promise<DemoUsersFile> {
+  let diskUsers: DemoUserRecord[] = [];
+  try {
+    const raw = await readJsonText(USERS_KEY, USERS_PATH);
+    if (raw) {
+      const parsed = JSON.parse(raw) as DemoUsersFile;
+      if (Array.isArray(parsed.users)) diskUsers = parsed.users;
+    }
+  } catch {
+    diskUsers = [];
+  }
+
+  const cookieUsers = (await readRosterCookie()) ?? [];
+  return { users: mergeUsers(diskUsers, cookieUsers) };
+}
+
+async function writeUsers(file: DemoUsersFile): Promise<string> {
   await writeJsonText(USERS_KEY, USERS_PATH, JSON.stringify(file, null, 2));
+  const token = await encodeRosterCookie(file.users);
+  await setRosterCookie(file.users);
+  return token;
+}
+
+/** Latest roster token from the most recent write (for attaching onto NextResponse). */
+let lastRosterToken: string | null = null;
+
+export function takeLastRosterToken(): string | null {
+  const token = lastRosterToken;
+  lastRosterToken = null;
+  return token;
 }
 
 export async function findDemoUserByEmail(
@@ -97,7 +128,7 @@ export async function createDemoUser(input: {
   };
 
   file.users.push(user);
-  await writeUsers(file);
+  lastRosterToken = await writeUsers(file);
   return user;
 }
 
@@ -109,5 +140,8 @@ export async function authenticateDemoUser(
   if (!user || !verifyPassword(password, user.salt, user.password_hash)) {
     throw new Error("Invalid email or password.");
   }
+  // Refresh roster cookie so this browser keeps a durable copy.
+  const file = await readUsers();
+  lastRosterToken = await writeUsers(file);
   return user;
 }

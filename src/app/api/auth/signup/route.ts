@@ -2,7 +2,8 @@ import { isDemoMode, isSupabaseConfigured } from "@/lib/config";
 import { applySessionCookie } from "@/lib/auth/session";
 import { jsonError, jsonOk, rateLimit } from "@/lib/api";
 import { ensureEmptyDemoStore } from "@/lib/demo/store";
-import { createDemoUser } from "@/lib/demo/users";
+import { attachRosterCookie } from "@/lib/demo/roster-cookie";
+import { createDemoUser, takeLastRosterToken } from "@/lib/demo/users";
 import { ValidationError } from "@/lib/data/auth";
 
 export async function POST(request: Request) {
@@ -39,7 +40,7 @@ export async function POST(request: Request) {
     const user = await createDemoUser({ email, password, fullName });
     await ensureEmptyDemoStore(user.id, user.email, user.full_name);
 
-    const response = jsonOk({
+    let response = jsonOk({
       user: {
         id: user.id,
         email: user.email,
@@ -47,11 +48,16 @@ export async function POST(request: Request) {
       },
     });
 
-    return await applySessionCookie(response, {
+    response = await applySessionCookie(response, {
       userId: user.id,
       email: user.email,
       fullName: user.full_name,
     });
+
+    const roster = takeLastRosterToken();
+    if (roster) response = attachRosterCookie(response, roster);
+
+    return response;
   } catch (e) {
     return jsonError(e);
   }

@@ -2,7 +2,8 @@ import { isDemoMode, isSupabaseConfigured } from "@/lib/config";
 import { applySessionCookie } from "@/lib/auth/session";
 import { jsonError, jsonOk, rateLimit } from "@/lib/api";
 import { getDemoStore } from "@/lib/demo/store";
-import { authenticateDemoUser } from "@/lib/demo/users";
+import { attachRosterCookie } from "@/lib/demo/roster-cookie";
+import { authenticateDemoUser, takeLastRosterToken } from "@/lib/demo/users";
 import { ValidationError } from "@/lib/data/auth";
 
 export async function POST(request: Request) {
@@ -35,7 +36,7 @@ export async function POST(request: Request) {
     const user = await authenticateDemoUser(email, password);
     await getDemoStore(user.id, { email: user.email, fullName: user.full_name });
 
-    const response = jsonOk({
+    let response = jsonOk({
       user: {
         id: user.id,
         email: user.email,
@@ -43,11 +44,16 @@ export async function POST(request: Request) {
       },
     });
 
-    return await applySessionCookie(response, {
+    response = await applySessionCookie(response, {
       userId: user.id,
       email: user.email,
       fullName: user.full_name,
     });
+
+    const roster = takeLastRosterToken();
+    if (roster) response = attachRosterCookie(response, roster);
+
+    return response;
   } catch (e) {
     if (e instanceof Error && e.message === "Invalid email or password.") {
       return jsonError(new ValidationError(e.message), 401);

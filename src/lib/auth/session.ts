@@ -22,10 +22,10 @@ export async function readSessionFromCookies(): Promise<SessionPayload | null> {
   return decodeSession(jar.get(SESSION_COOKIE)?.value);
 }
 
-export async function applySessionCookie(
-  response: NextResponse,
+export async function applySessionCookie<T extends NextResponse>(
+  response: T,
   payload: Omit<SessionPayload, "exp">
-): Promise<NextResponse> {
+): Promise<T> {
   response.cookies.set(
     SESSION_COOKIE,
     await encodeSession(payload),

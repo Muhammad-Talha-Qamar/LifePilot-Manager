@@ -1,6 +1,7 @@
 import { isDemoMode, isSupabaseConfigured } from "@/lib/config";
-import { clearSessionCookie } from "@/lib/auth/session";
+import { clearSessionCookie, sessionCookieOptions } from "@/lib/auth/session";
 import { jsonOk } from "@/lib/api";
+import { ROSTER_COOKIE } from "@/lib/demo/roster-cookie";
 import { createClient } from "@/lib/supabase/server";
 
 export async function POST() {
@@ -14,5 +15,10 @@ export async function POST() {
   }
 
   const response = jsonOk({ signedOut: true });
-  return clearSessionCookie(response);
+  clearSessionCookie(response);
+  response.cookies.set(ROSTER_COOKIE, "", {
+    ...sessionCookieOptions(0),
+    maxAge: 0,
+  });
+  return response;
 }

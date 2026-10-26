@@ -19,26 +19,29 @@ export async function requireAuth(): Promise<AuthContext> {
       throw new AuthError("Authentication required");
     }
 
+    // Prefer the durable roster/disk/blobs record when present.
+    // If this serverless instance lost ephemeral demo files, still trust the
+    // HMAC-signed session cookie so sign-up/sign-in don't bounce to /login.
     const user = await findDemoUserById(session.userId);
-    if (!user) {
-      throw new AuthError("Authentication required");
-    }
+    const userId = user?.id ?? session.userId;
+    const email = user?.email ?? session.email;
+    const fullName = user?.full_name ?? session.fullName;
+    const createdAt = user?.created_at;
 
-    const store = await getDemoStore(user.id, {
-      email: user.email,
-      fullName: user.full_name,
+    const store = await getDemoStore(userId, {
+      email,
+      fullName,
     });
 
     return {
-      userId: user.id,
-      email: user.email,
+      userId,
+      email,
       isDemo: true,
-      // Prefer signup time over store reset timestamps
       profile: {
         ...store.profile,
-        email: user.email,
-        full_name: user.full_name ?? store.profile.full_name,
-        created_at: user.created_at || store.profile.created_at,
+        email,
+        full_name: fullName ?? store.profile.full_name,
+        created_at: createdAt || store.profile.created_at,
       },
     };
   }

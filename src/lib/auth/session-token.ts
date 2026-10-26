@@ -68,6 +68,28 @@ async function verify(body: string, signature: string): Promise<boolean> {
   );
 }
 
+/** Sign an arbitrary JSON value (HMAC). Used for demo roster cookies. */
+export async function encodeSignedJson<T>(value: T): Promise<string> {
+  const body = toBase64Url(new TextEncoder().encode(JSON.stringify(value)));
+  const signature = await sign(body);
+  return `${body}.${signature}`;
+}
+
+export async function decodeSignedJson<T>(
+  token: string | undefined | null
+): Promise<T | null> {
+  if (!token) return null;
+  const [body, signature] = token.split(".");
+  if (!body || !signature) return null;
+  if (!(await verify(body, signature))) return null;
+  try {
+    const json = new TextDecoder().decode(fromBase64Url(body));
+    return JSON.parse(json) as T;
+  } catch {
+    return null;
+  }
+}
+
 export async function encodeSession(
   payload: Omit<SessionPayload, "exp">
 ): Promise<string> {
@@ -75,27 +97,17 @@ export async function encodeSession(
     ...payload,
     exp: Date.now() + SESSION_DAYS * 24 * 60 * 60 * 1000,
   };
-  const body = toBase64Url(new TextEncoder().encode(JSON.stringify(full)));
-  const signature = await sign(body);
-  return `${body}.${signature}`;
+  return encodeSignedJson(full);
 }
 
 export async function decodeSession(
   token: string | undefined | null
 ): Promise<SessionPayload | null> {
-  if (!token) return null;
-  const [body, signature] = token.split(".");
-  if (!body || !signature) return null;
-  if (!(await verify(body, signature))) return null;
-  try {
-    const json = new TextDecoder().decode(fromBase64Url(body));
-    const payload = JSON.parse(json) as SessionPayload;
-    if (!payload.userId || !payload.email || !payload.exp) return null;
-    if (payload.exp < Date.now()) return null;
-    return payload;
-  } catch {
-    return null;
-  }
+  const payload = await decodeSignedJson<SessionPayload>(token);
+  if (!payload) return null;
+  if (!payload.userId || !payload.email || !payload.exp) return null;
+  if (payload.exp < Date.now()) return null;
+  return payload;
 }
 
 export function sessionCookieOptions(maxAgeSeconds = SESSION_DAYS * 24 * 60 * 60) {
