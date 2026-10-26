@@ -1,0 +1,9 @@
+# Next.js on Netlify (OpenNext adapter applied automatically — do not pin the plugin).
+# https://docs.netlify.com/frameworks/next-js/overview/
+
+[build]
+  command = "npm run build"
+  publish = ".next"
+
+[build.environment]
+  NODE_VERSION = "20"

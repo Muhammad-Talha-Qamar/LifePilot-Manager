@@ -1,36 +1,39 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# LifePilot
 
-## Getting Started
+AI-first personal task manager. The home route opens the assistant; tasks, checklists, projects, and calendar stay one click away.
 
-First, run the development server:
+## Local development
 
 ```bash
+npm install
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Open [http://localhost:3000](http://localhost:3000). Do not open `index.html` with Live Server — that file only points you at the Next.js dev server.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+```bash
+npm run typecheck
+npm run test
+npm run lint
+npm run build
+```
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+## Demo vs Supabase
 
-## Learn More
+Without Supabase env vars the app runs in demo mode (in-memory seed data). Optional:
 
-To learn more about Next.js, take a look at the following resources:
+- `NEXT_PUBLIC_SUPABASE_URL`
+- `NEXT_PUBLIC_SUPABASE_ANON_KEY`
+- `OPENAI_API_KEY` (falls back to the local rule-based agent if unset)
+- `OPENAI_MODEL` (default `gpt-4o-mini`)
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+## Deploy on Netlify
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+This app is set up for **Netlify**, not Vercel.
 
-## Deploy on Vercel
+1. Push this repo to GitHub (the full LifePilot app, not only the create-next-app starter).
+2. In [Netlify](https://app.netlify.com): **Add new site → Import an existing project** → choose the repo.
+3. Build settings are already in `netlify.toml` (`npm run build`, publish `.next`). Leave the Next.js runtime / OpenNext adapter automatic — do not pin `@netlify/plugin-nextjs`.
+4. Add any env vars under **Site configuration → Environment variables**, then deploy.
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+Site URL will be `https://<your-site>.netlify.app` (or your custom domain). There is no Vercel step in this flow.
