@@ -1,4 +1,4 @@
-import { randomBytes, scryptSync, timingSafeEqual } from "crypto";
+import { createHash, randomBytes, scryptSync, timingSafeEqual } from "crypto";
 import path from "path";
 import { generateId, nowIso } from "@/lib/utils";
 import { readJsonText, writeJsonText } from "./persist";
@@ -8,8 +8,11 @@ import {
   setRosterCookie,
 } from "./roster-cookie";
 
-const USERS_PATH = path.join(process.cwd(), ".demo-users.json");
+const USERS_PATH = path.join(process.cwd(), ".demo-data", "users.json");
 const USERS_KEY = "users";
+
+/** Light scrypt params — default Node scrypt is too heavy/slow for Netlify Functions. */
+const SCRYPT = { N: 1024, r: 8, p: 1, maxmem: 32 * 1024 * 1024 } as const;
 
 export interface DemoUserRecord {
   id: string;
@@ -29,7 +32,12 @@ function normalizeEmail(email: string): string {
 }
 
 function hashPassword(password: string, salt: string): string {
-  return scryptSync(password, salt, 64).toString("base64url");
+  try {
+    return scryptSync(password, salt, 32, SCRYPT).toString("base64url");
+  } catch {
+    // Fallback if memory caps still fail on tiny runtimes.
+    return createHash("sha256").update(`${salt}:${password}`).digest("base64url");
+  }
 }
 
 export function verifyPassword(
@@ -38,8 +46,10 @@ export function verifyPassword(
   passwordHash: string
 ): boolean {
   const next = hashPassword(password, salt);
-  if (next.length !== passwordHash.length) return false;
-  return timingSafeEqual(Buffer.from(next), Buffer.from(passwordHash));
+  const a = Buffer.from(next);
+  const b = Buffer.from(passwordHash);
+  if (a.length !== b.length) return false;
+  return timingSafeEqual(a, b);
 }
 
 function mergeUsers(
@@ -69,9 +79,17 @@ async function readUsers(): Promise<DemoUsersFile> {
 }
 
 async function writeUsers(file: DemoUsersFile): Promise<string> {
-  await writeJsonText(USERS_KEY, USERS_PATH, JSON.stringify(file, null, 2));
+  try {
+    await writeJsonText(USERS_KEY, USERS_PATH, JSON.stringify(file, null, 2));
+  } catch (error) {
+    console.warn("[lifepilot] demo users persist write failed:", error);
+  }
   const token = await encodeRosterCookie(file.users);
-  await setRosterCookie(file.users);
+  try {
+    await setRosterCookie(file.users);
+  } catch {
+    // Response cookie attach happens in the auth route.
+  }
   return token;
 }
 

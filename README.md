@@ -9,7 +9,7 @@ npm install
 npm run dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000). Do not open `index.html` with Live Server — that file only points you at the Next.js dev server.
+Open [http://localhost:3000](http://localhost:3000). Do not open a static HTML file with Live Server — use the Next.js dev server (`npm run dev`).
 
 ```bash
 npm run typecheck
@@ -43,18 +43,14 @@ This app is set up for **Netlify**, not Vercel.
 
 1. Push this repo to GitHub (the full LifePilot app, not only the create-next-app starter).
 2. In [Netlify](https://app.netlify.com): **Add new site → Import an existing project** → choose the repo.
-3. Build settings are already in `netlify.toml` (`npm run build`, publish `.next`). Leave the Next.js runtime / OpenNext adapter automatic — do not pin `@netlify/plugin-nextjs`.
-4. Env vars: `netlify.toml` already forces **demo auth** (`LIFEPILOT_FORCE_DEMO` / `NEXT_PUBLIC_LIFEPILOT_FORCE_DEMO`) so **Create account** and **Sign in** work without Supabase.
-5. Deploy via Git push to the linked repo, or:
-   ```bash
-   npm run build
-   npx netlify deploy --prod
-   ```
-6. Optional env vars (Netlify UI → Site configuration → Environment variables):
+3. Build settings are in `netlify.toml` (`npm run build`, publish `.next`, plugin `@netlify/plugin-nextjs`).
+   - In Netlify UI confirm **Plugins** includes **Essential Next.js**, and `NETLIFY_NEXT_PLUGIN_SKIP` is **not** `true`.
+   - If every page shows Netlify’s “Page not found”, the Next runtime is off — API routes like `/api/auth/signup` will fail with “Something went wrong.”
+4. Env vars: `netlify.toml` forces **demo auth** so **Create account** / **Sign in** work without Supabase.
+5. Deploy via Git push to the linked repo (or `npx netlify deploy --prod` after `npm run build`).
+6. Optional env vars (Netlify UI → Environment variables):
    - `LIFEPILOT_SESSION_SECRET` — stable cookie signing across deploys
    - `OPENAI_API_KEY` — cloud AI (otherwise the local rule-based agent is used)
-   - To switch off demo mode later: remove the FORCE_DEMO flags and set `NEXT_PUBLIC_SUPABASE_URL` + `NEXT_PUBLIC_SUPABASE_ANON_KEY` (run `supabase/migrations/001_initial_schema.sql`)
+   - For Supabase later: remove FORCE_DEMO flags and set `NEXT_PUBLIC_SUPABASE_URL` + `NEXT_PUBLIC_SUPABASE_ANON_KEY`
 
-Site URL will be `https://<your-site>.netlify.app` (or your custom domain). There is no Vercel step in this flow.
-
-After deploy, open `/signup`, create an account, then use `/login` — both should work in demo mode.
+After a successful deploy, `/api/health` should return JSON (`demoMode: true`). Then open `/signup` and create an account.

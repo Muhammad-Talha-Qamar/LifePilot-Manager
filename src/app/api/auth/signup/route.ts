@@ -37,8 +37,19 @@ export async function POST(request: Request) {
       );
     }
 
-    const user = await createDemoUser({ email, password, fullName });
-    await ensureEmptyDemoStore(user.id, user.email, user.full_name);
+    let user;
+    try {
+      user = await createDemoUser({ email, password, fullName });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Could not create account.";
+      throw new ValidationError(message);
+    }
+
+    try {
+      await ensureEmptyDemoStore(user.id, user.email, user.full_name);
+    } catch (error) {
+      console.warn("[lifepilot] empty demo store failed after signup:", error);
+    }
 
     let response = jsonOk({
       user: {

@@ -13,12 +13,20 @@ import { isDemoMode } from "@/lib/config";
 type Mode = "login" | "signup";
 
 async function parseApiError(res: Response): Promise<string> {
+  const text = await res.text();
   try {
-    const json = (await res.json()) as { error?: string };
-    return json.error || "Something went wrong.";
+    const json = JSON.parse(text) as { error?: string };
+    if (json.error) return json.error;
   } catch {
-    return "Something went wrong.";
+    // Non-JSON body (often Netlify's HTML 404 when the Next runtime isn't active).
   }
+  if (res.status === 404 || /page not found/i.test(text)) {
+    return "Sign-up API is not available on this deploy. In Netlify, confirm the Next.js runtime plugin is enabled and redeploy.";
+  }
+  if (res.status >= 500) {
+    return "The server could not create your account. Please try again in a moment.";
+  }
+  return text.trim().slice(0, 160) || "Something went wrong.";
 }
 
 export function AuthForm({ mode }: { mode: Mode }) {

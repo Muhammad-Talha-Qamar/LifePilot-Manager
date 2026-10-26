@@ -1,4 +1,6 @@
-# Next.js on Netlify (OpenNext adapter applied automatically — do not pin the plugin).
+# Next.js on Netlify via OpenNext adapter (@netlify/plugin-nextjs).
+# Without this plugin, publish=".next" is served as static files and every
+# route (including /api/auth/signup) returns Netlify's 404 HTML page.
 # https://docs.netlify.com/frameworks/next-js/overview/
 
 [build]
@@ -7,19 +9,27 @@
 
 [build.environment]
   NODE_VERSION = "20"
+  # Ensure the Next.js runtime is never skipped
+  NETLIFY_NEXT_PLUGIN_SKIP = "false"
   # Force local/demo accounts (sign-up & sign-in via /api/auth) — no Supabase required.
   LIFEPILOT_FORCE_DEMO = "true"
   NEXT_PUBLIC_LIFEPILOT_FORCE_DEMO = "true"
 
+[[plugins]]
+  package = "@netlify/plugin-nextjs"
+
 # Same flags for runtime (serverless functions / SSR).
 [context.production.environment]
+  NETLIFY_NEXT_PLUGIN_SKIP = "false"
   LIFEPILOT_FORCE_DEMO = "true"
   NEXT_PUBLIC_LIFEPILOT_FORCE_DEMO = "true"
 
 [context.deploy-preview.environment]
+  NETLIFY_NEXT_PLUGIN_SKIP = "false"
   LIFEPILOT_FORCE_DEMO = "true"
   NEXT_PUBLIC_LIFEPILOT_FORCE_DEMO = "true"
 
 [context.branch-deploy.environment]
+  NETLIFY_NEXT_PLUGIN_SKIP = "false"
   LIFEPILOT_FORCE_DEMO = "true"
   NEXT_PUBLIC_LIFEPILOT_FORCE_DEMO = "true"
