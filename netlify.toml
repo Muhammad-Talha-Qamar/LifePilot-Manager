@@ -7,3 +7,19 @@
 
 [build.environment]
   NODE_VERSION = "20"
+  # Force local/demo accounts (sign-up & sign-in via /api/auth) — no Supabase required.
+  LIFEPILOT_FORCE_DEMO = "true"
+  NEXT_PUBLIC_LIFEPILOT_FORCE_DEMO = "true"
+
+# Same flags for runtime (serverless functions / SSR).
+[context.production.environment]
+  LIFEPILOT_FORCE_DEMO = "true"
+  NEXT_PUBLIC_LIFEPILOT_FORCE_DEMO = "true"
+
+[context.deploy-preview.environment]
+  LIFEPILOT_FORCE_DEMO = "true"
+  NEXT_PUBLIC_LIFEPILOT_FORCE_DEMO = "true"
+
+[context.branch-deploy.environment]
+  LIFEPILOT_FORCE_DEMO = "true"
+  NEXT_PUBLIC_LIFEPILOT_FORCE_DEMO = "true"

@@ -19,7 +19,13 @@ export function isOpenAIConfigured(): boolean {
 }
 
 export function isDemoMode(): boolean {
-  if (process.env.LIFEPILOT_FORCE_DEMO === "true") return true;
+  // NEXT_PUBLIC_ variant keeps the browser auth form on the same path as the server.
+  if (
+    process.env.LIFEPILOT_FORCE_DEMO === "true" ||
+    process.env.NEXT_PUBLIC_LIFEPILOT_FORCE_DEMO === "true"
+  ) {
+    return true;
+  }
   return !isSupabaseConfigured();
 }
 

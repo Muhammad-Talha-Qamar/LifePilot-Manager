@@ -8,7 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { LifePilotLogo } from "@/components/motion/animate";
-import { isSupabaseConfigured } from "@/lib/config";
+import { isDemoMode } from "@/lib/config";
 
 type Mode = "login" | "signup";
 
@@ -29,14 +29,15 @@ export function AuthForm({ mode }: { mode: Mode }) {
   const [password, setPassword] = useState("");
   const [fullName, setFullName] = useState("");
   const [busy, setBusy] = useState(false);
-  const supabaseReady = isSupabaseConfigured();
+  // Demo mode uses /api/auth/* (works on Netlify without Supabase).
+  const useSupabase = !isDemoMode();
 
   async function onSubmit(event: FormEvent) {
     event.preventDefault();
     if (busy) return;
     setBusy(true);
     try {
-      if (supabaseReady) {
+      if (useSupabase) {
         const { createClient } = await import("@/lib/supabase/client");
         const supabase = createClient();
         if (mode === "signup") {
