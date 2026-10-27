@@ -12,6 +12,7 @@ const PROMPTS = [
   "What should I finish today?",
   "Remind me to call mom tomorrow",
   "Plan my day",
+  "Create a project called _________",
   "Create a checklist for groceries with milk and eggs",
 ];
 
@@ -135,7 +136,14 @@ export function AssistantWorkspace() {
                   <button
                     key={prompt}
                     type="button"
-                    onClick={() => void send(prompt)}
+                    onClick={() => {
+                      if (prompt.includes("_________")) {
+                        setDraft(prompt);
+                        field.current?.focus();
+                        return;
+                      }
+                      void send(prompt);
+                    }}
                     disabled={busy}
                     className="ai-suggestion animate-fade-up max-w-full text-[12px] sm:text-sm"
                     style={{ animationDelay: `${80 + index * 60}ms` }}
@@ -268,7 +276,7 @@ export function AssistantWorkspace() {
               : openaiConfigured
                 ? "Enter to send · Shift+Enter for a new line"
                 : mode === "local"
-                  ? "Say it casually — typos and shortcuts are fine · Enter to send"
+                  ? "only use the options that are given for prompts"
                   : "Enter to send · Shift+Enter for a new line"}
           </p>
         </form>
