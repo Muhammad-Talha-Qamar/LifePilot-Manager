@@ -98,6 +98,12 @@ export interface ScheduleSlot {
   kind: "task" | "event";
 }
 
+export interface AgentStep {
+  name: string;
+  label: string;
+  status: "running" | "done" | "error";
+}
+
 export type AssistantBlock =
   | { type: "tasks"; title: string; tasks: TaskCardData[] }
   | { type: "events"; title: string; events: EventCardData[] }
@@ -105,7 +111,9 @@ export type AssistantBlock =
   | { type: "projects"; title: string; projects: ProjectCardData[] }
   | { type: "schedule"; title: string; saved: false; note: string; slots: ScheduleSlot[] }
   | { type: "confirm"; prompt: string; action: PendingAction }
-  | { type: "notice"; tone: "info" | "success" | "error"; text: string };
+  | { type: "notice"; tone: "info" | "success" | "error"; text: string }
+  | { type: "steps"; title: string; steps: AgentStep[] }
+  | { type: "followups"; suggestions: string[] };
 
 export interface ScheduleQueryResult {
   period: { kind: string; label: string; from: string | null; to: string | null };

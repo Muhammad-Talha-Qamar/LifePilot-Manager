@@ -100,6 +100,8 @@ const bodySchema = z.object({
     .optional(),
   dismissPending: z.boolean().optional(),
   stream: z.boolean().optional(),
+  agentMode: z.enum(["agent", "plan", "ask"]).optional(),
+  customInstructions: z.string().max(2000).optional(),
 });
 
 function sseEncode(event: string, data: unknown): Uint8Array {
@@ -116,6 +118,8 @@ function publicResult(result: AgentResult) {
       success: call.success,
     })),
     mode: result.mode,
+    agentMode: result.agentMode,
+    followUps: result.followUps ?? [],
     openaiConfigured: result.openaiConfigured,
     error: result.error ? humanizeError(result.error) : undefined,
     // Keep a server-side diagnostic code available without dumping stacks to users.
@@ -146,6 +150,8 @@ export async function POST(request: Request) {
       context: body.context,
       confirm: body.confirm,
       dismissPending: body.dismissPending,
+      agentMode: body.agentMode,
+      customInstructions: body.customInstructions,
       signal: request.signal,
     };
 
@@ -170,6 +176,13 @@ export async function POST(request: Request) {
             onEvent: (event) => {
               if (event.type === "status") send("status", { status: event.status });
               if (event.type === "delta") send("delta", { text: event.text });
+              if (event.type === "tool") {
+                send("tool", {
+                  name: event.name,
+                  label: event.label,
+                  status: event.status,
+                });
+              }
             },
           });
           send("done", publicResult(result));

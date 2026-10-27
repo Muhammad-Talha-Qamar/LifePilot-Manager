@@ -44,6 +44,57 @@ export function MessageBlocks({ blocks }: { blocks: AssistantBlock[] }) {
 }
 
 function Block({ block }: { block: AssistantBlock }) {
+  const { send } = useAssistant();
+
+  if (block.type === "steps") {
+    return (
+      <div className="ai-block-card rounded-xl border border-border/60 bg-surface-soft/80 px-3 py-2.5">
+        <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+          {block.title}
+        </p>
+        <ul className="mt-1.5 space-y-1">
+          {block.steps.map((step, index) => (
+            <li
+              key={`${step.name}-${index}`}
+              className="flex items-center gap-2 text-[12px] text-foreground/90 sm:text-[13px]"
+            >
+              <span
+                className={
+                  step.status === "done"
+                    ? "text-emerald-600"
+                    : step.status === "error"
+                      ? "text-rose-600"
+                      : "text-muted-foreground"
+                }
+                aria-hidden
+              >
+                {step.status === "done" ? "✓" : step.status === "error" ? "!" : "·"}
+              </span>
+              <span>{step.label}</span>
+            </li>
+          ))}
+        </ul>
+      </div>
+    );
+  }
+
+  if (block.type === "followups") {
+    return (
+      <div className="flex flex-wrap gap-1.5 pt-0.5">
+        {block.suggestions.map((suggestion) => (
+          <button
+            key={suggestion}
+            type="button"
+            onClick={() => void send(suggestion)}
+            className="ai-suggestion !rounded-lg !px-2.5 !py-1 text-[11px] sm:!rounded-xl sm:text-xs"
+          >
+            {suggestion}
+          </button>
+        ))}
+      </div>
+    );
+  }
+
   if (block.type === "tasks") return <TaskList title={block.title} tasks={block.tasks} />;
   if (block.type === "checklists") {
     return (

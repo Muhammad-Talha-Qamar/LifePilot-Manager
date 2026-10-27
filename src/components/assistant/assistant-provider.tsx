@@ -12,7 +12,12 @@ import {
 import { api } from "@/lib/client-api";
 import { DATA_CHANGED_EVENT, notifyDataChanged } from "@/lib/data-events";
 import { isOverdue } from "@/lib/utils/dates";
-import type { AssistantBlock, ConversationContext } from "@/lib/ai/types";
+import {
+  type AgentMode,
+  parseSlashCommand,
+  SLASH_HELP,
+} from "@/lib/ai/agent-mode";
+import type { AgentStep, AssistantBlock, ConversationContext } from "@/lib/ai/types";
 import { emptyContext } from "@/lib/ai/types";
 import {
   friendlyRequestError,
@@ -22,6 +27,7 @@ import { prefersReducedMotion, revealText } from "@/lib/ai/typing";
 import type { Checklist, ChecklistItem, Task } from "@/types";
 
 const STORAGE_KEY = "lifepilot-assistant-v1";
+const INSTRUCTIONS_KEY = "lifepilot-agent-instructions";
 const WRITE_TOOLS = new Set([
   "create_task",
   "update_task",
@@ -55,6 +61,8 @@ interface ChatResponse {
   context: ConversationContext;
   toolCalls: { name: string; success: boolean }[];
   mode: "model" | "local";
+  agentMode?: AgentMode;
+  followUps?: string[];
   openaiConfigured: boolean;
   error?: string;
 }
@@ -66,9 +74,16 @@ interface AssistantApi {
   busy: boolean;
   /** True while waiting for the first visible reply text. */
   thinking: boolean;
+  activity: AgentStep[];
+  queueLength: number;
   openaiConfigured: boolean | null;
   mode: "model" | "local" | null;
+  agentMode: AgentMode;
+  setAgentMode: (mode: AgentMode) => void;
+  customInstructions: string;
+  setCustomInstructions: (value: string) => void;
   send: (text?: string) => Promise<void>;
+  regenerate: () => Promise<void>;
   stop: () => void;
   clearChat: () => void;
   confirm: (action: { tool: string; args: Record<string, unknown> }) => Promise<void>;
@@ -90,6 +105,7 @@ async function readSseChat(
   handlers: {
     onStatus?: (status: string) => void;
     onDelta?: (text: string) => void;
+    onTool?: (step: AgentStep) => void;
     onDone?: (data: ChatResponse) => void;
     onError?: (message: string) => void;
   },
@@ -141,6 +157,15 @@ async function readSseChat(
       handlers.onStatus?.(String((parsed as { status: string }).status));
     } else if (name === "delta" && parsed && typeof parsed === "object" && "text" in parsed) {
       handlers.onDelta?.(String((parsed as { text: string }).text));
+    } else if (name === "tool" && parsed && typeof parsed === "object") {
+      const tool = parsed as { name?: string; label?: string; status?: string };
+      if (tool.name && tool.label && tool.status) {
+        handlers.onTool?.({
+          name: tool.name,
+          label: tool.label,
+          status: tool.status as AgentStep["status"],
+        });
+      }
     } else if (name === "done") {
       handlers.onDone?.(parsed as ChatResponse);
     } else if (name === "error" && parsed && typeof parsed === "object" && "message" in parsed) {
@@ -192,10 +217,18 @@ export function AssistantProvider({ children }: { children: React.ReactNode }) {
   const [context, setContext] = useState<ConversationContext>(emptyContext());
   const [busy, setBusy] = useState(false);
   const [thinking, setThinking] = useState(false);
+  const [activity, setActivity] = useState<AgentStep[]>([]);
+  const [queue, setQueue] = useState<string[]>([]);
   const [openaiConfigured, setOpenaiConfigured] = useState<boolean | null>(null);
   const [mode, setMode] = useState<"model" | "local" | null>(null);
+  const [agentMode, setAgentMode] = useState<AgentMode>("agent");
+  const [customInstructions, setCustomInstructionsState] = useState("");
   const contextRef = useRef(context);
   const messagesRef = useRef(messages);
+  const busyRef = useRef(false);
+  const agentModeRef = useRef<AgentMode>("agent");
+  const instructionsRef = useRef("");
+  const queueRef = useRef<string[]>([]);
   const abortRef = useRef<AbortController | null>(null);
   const activeAssistantIdRef = useRef<string | null>(null);
   const [ready, setReady] = useState(false);
@@ -206,6 +239,18 @@ export function AssistantProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     messagesRef.current = messages;
   }, [messages]);
+  useEffect(() => {
+    busyRef.current = busy;
+  }, [busy]);
+  useEffect(() => {
+    agentModeRef.current = agentMode;
+  }, [agentMode]);
+  useEffect(() => {
+    instructionsRef.current = customInstructions;
+  }, [customInstructions]);
+  useEffect(() => {
+    queueRef.current = queue;
+  }, [queue]);
 
   useEffect(() => {
     try {
@@ -215,6 +260,7 @@ export function AssistantProvider({ children }: { children: React.ReactNode }) {
           messages?: AssistantMessage[];
           draft?: string;
           context?: ConversationContext;
+          agentMode?: AgentMode;
         };
         if (saved.messages) {
           setMessages(
@@ -226,7 +272,12 @@ export function AssistantProvider({ children }: { children: React.ReactNode }) {
         }
         if (typeof saved.draft === "string") setDraft(saved.draft);
         if (saved.context) setContext({ ...emptyContext(), ...saved.context });
+        if (saved.agentMode === "agent" || saved.agentMode === "plan" || saved.agentMode === "ask") {
+          setAgentMode(saved.agentMode);
+        }
       }
+      const instructions = sessionStorage.getItem(INSTRUCTIONS_KEY);
+      if (instructions) setCustomInstructionsState(instructions);
     } catch {
       sessionStorage.removeItem(STORAGE_KEY);
     }
@@ -250,9 +301,19 @@ export function AssistantProvider({ children }: { children: React.ReactNode }) {
           })),
         draft,
         context,
+        agentMode,
       })
     );
-  }, [ready, messages, draft, context]);
+  }, [ready, messages, draft, context, agentMode]);
+
+  const setCustomInstructions = useCallback((value: string) => {
+    setCustomInstructionsState(value);
+    try {
+      sessionStorage.setItem(INSTRUCTIONS_KEY, value);
+    } catch {
+      // Ignore storage failures.
+    }
+  }, []);
 
   useEffect(() => {
     void api<{ openai: boolean }>("/api/health")
@@ -448,6 +509,20 @@ export function AssistantProvider({ children }: { children: React.ReactNode }) {
     setBusy(false);
   }, []);
 
+  const drainQueue = useCallback(async () => {
+    const next = queueRef.current[0];
+    if (!next || busyRef.current) return;
+    setQueue((current) => current.slice(1));
+    // Deferred so busyRef clears before send.
+    await Promise.resolve();
+    // send is defined below; call through a microtask after state updates.
+    queueMicrotask(() => {
+      void sendRef.current?.(next);
+    });
+  }, []);
+
+  const sendRef = useRef<((text?: string) => Promise<void>) | null>(null);
+
   const runChat = useCallback(
     async (payload: Record<string, unknown>, options?: { clearConfirms?: boolean }) => {
       const assistantId = newId();
@@ -465,6 +540,7 @@ export function AssistantProvider({ children }: { children: React.ReactNode }) {
       ]);
       setBusy(true);
       setThinking(true);
+      setActivity([]);
 
       const controller = new AbortController();
       abortRef.current = controller;
@@ -472,9 +548,15 @@ export function AssistantProvider({ children }: { children: React.ReactNode }) {
       let donePromise: Promise<void> | null = null;
       let sawTerminalEvent = false;
 
+      const enriched = {
+        ...payload,
+        agentMode: agentModeRef.current,
+        customInstructions: instructionsRef.current || undefined,
+      };
+
       try {
         await readSseChat(
-          payload,
+          enriched,
           {
             onStatus: () => {
               if (!receivedDelta) setThinking(true);
@@ -494,6 +576,20 @@ export function AssistantProvider({ children }: { children: React.ReactNode }) {
                     : message
                 )
               );
+            },
+            onTool: (step) => {
+              setThinking(false);
+              setActivity((current) => {
+                const index = current.findIndex(
+                  (item) => item.name === step.name && item.status === "running"
+                );
+                if (index >= 0) {
+                  const copy = [...current];
+                  copy[index] = step;
+                  return copy;
+                }
+                return [...current, step];
+              });
             },
             onDone: (data) => {
               sawTerminalEvent = true;
@@ -525,7 +621,6 @@ export function AssistantProvider({ children }: { children: React.ReactNode }) {
         if (donePromise) {
           await donePromise;
         } else if (!sawTerminalEvent && !controller.signal.aborted) {
-          // Stream ended without a done event — leave whatever text we have.
           setThinking(false);
           patchAssistant(assistantId, { streaming: false });
         }
@@ -560,19 +655,94 @@ export function AssistantProvider({ children }: { children: React.ReactNode }) {
         if (activeAssistantIdRef.current === assistantId) activeAssistantIdRef.current = null;
         setThinking(false);
         setBusy(false);
+        setActivity([]);
+        queueMicrotask(() => {
+          void drainQueue();
+        });
       }
     },
-    [applyChatResult, patchAssistant]
+    [applyChatResult, drainQueue, patchAssistant]
   );
 
   const send = useCallback(
     async (text?: string) => {
-      const content = (text ?? draft).trim();
-      if (!content || busy) return;
+      const raw = (text ?? draft).trim();
+      if (!raw) return;
+
+      if (busyRef.current) {
+        setQueue((current) => [...current, raw].slice(-8));
+        if (!text) setDraft("");
+        return;
+      }
+
+      const parsed = parseSlashCommand(raw);
+
+      if (parsed.builtin === "clear") {
+        if (!text) setDraft("");
+        setMessages([]);
+        setContext(emptyContext());
+        setActivity([]);
+        setQueue([]);
+        try {
+          sessionStorage.removeItem(STORAGE_KEY);
+        } catch {
+          // ignore
+        }
+        return;
+      }
+
+      if (parsed.builtin === "help") {
+        if (!text) setDraft("");
+        setMessages((current) => [
+          ...current,
+          {
+            id: newId(),
+            role: "user",
+            content: raw,
+            createdAt: new Date().toISOString(),
+          },
+          {
+            id: newId(),
+            role: "assistant",
+            content: SLASH_HELP,
+            createdAt: new Date().toISOString(),
+          },
+        ]);
+        return;
+      }
+
+      if (parsed.builtin === "regenerate") {
+        if (!text) setDraft("");
+        const history = [...messagesRef.current];
+        while (history.length && history[history.length - 1]?.role === "assistant") {
+          history.pop();
+        }
+        if (!history.some((message) => message.role === "user")) return;
+        setMessages(history);
+        messagesRef.current = history;
+        await runChat({
+          messages: history
+            .slice(-20)
+            .map((message) => ({ role: message.role, content: message.content })),
+          context: contextRef.current,
+        });
+        return;
+      }
+
+      if (parsed.mode) {
+        setAgentMode(parsed.mode);
+        agentModeRef.current = parsed.mode;
+      }
+
+      const content =
+        parsed.builtin === "undo" ? "undo" : parsed.text || (parsed.mode ? `Switched to ${parsed.mode} mode.` : raw);
+
+      if (!content.trim()) return;
+
       const userMessage: AssistantMessage = {
         id: newId(),
         role: "user",
-        content,
+        content: parsed.mode && parsed.text ? raw : content,
         createdAt: new Date().toISOString(),
       };
       const history = [...messagesRef.current, userMessage].slice(-20).map((message) => ({
@@ -580,11 +750,17 @@ export function AssistantProvider({ children }: { children: React.ReactNode }) {
         content: message.content,
       }));
       setMessages((current) => [...current, userMessage]);
-      setDraft("");
+      if (!text) setDraft("");
       await runChat({ messages: history, context: contextRef.current });
     },
-    [busy, draft, runChat]
+    [draft, runChat]
   );
+
+  sendRef.current = send;
+
+  const regenerate = useCallback(async () => {
+    await send("/retry");
+  }, [send]);
 
   const confirm = useCallback(
     async (action: { tool: string; args: Record<string, unknown> }) => {
@@ -635,9 +811,16 @@ export function AssistantProvider({ children }: { children: React.ReactNode }) {
       setDraft,
       busy,
       thinking,
+      activity,
+      queueLength: queue.length,
       openaiConfigured,
       mode,
+      agentMode,
+      setAgentMode,
+      customInstructions,
+      setCustomInstructions,
       send,
+      regenerate,
       stop,
       clearChat,
       confirm,
@@ -650,9 +833,15 @@ export function AssistantProvider({ children }: { children: React.ReactNode }) {
       draft,
       busy,
       thinking,
+      activity,
+      queue.length,
       openaiConfigured,
       mode,
+      agentMode,
+      customInstructions,
+      setCustomInstructions,
       send,
+      regenerate,
       stop,
       clearChat,
       confirm,

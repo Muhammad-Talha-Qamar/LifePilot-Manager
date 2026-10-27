@@ -1,9 +1,10 @@
 "use client";
 
-import { useEffect, useRef } from "react";
-import { ArrowUp, Square } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import { ArrowUp, RotateCcw, Square } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { LifePilotLogo } from "@/components/motion/animate";
+import type { AgentMode } from "@/lib/ai/agent-mode";
 import { cn } from "@/lib/utils";
 import { MessageBlocks } from "./message-blocks";
 import { useAssistant } from "./assistant-provider";
@@ -14,7 +15,13 @@ const PROMPTS = [
   "The essay is done",
   "Shopping list: milk, eggs, bread",
   "Plan my day",
-  "Move maths homework to Friday",
+  "/plan organize my week",
+];
+
+const MODES: { id: AgentMode; label: string; hint: string }[] = [
+  { id: "agent", label: "Agent", hint: "Read + write" },
+  { id: "plan", label: "Plan", hint: "Steps only" },
+  { id: "ask", label: "Ask", hint: "Read-only" },
 ];
 
 function AssistantText({
@@ -46,16 +53,25 @@ export function AssistantWorkspace() {
     setDraft,
     busy,
     thinking,
+    activity,
+    queueLength,
     openaiConfigured,
+    agentMode,
+    setAgentMode,
+    customInstructions,
+    setCustomInstructions,
     send,
+    regenerate,
     stop,
   } = useAssistant();
   const scroller = useRef<HTMLDivElement>(null);
   const field = useRef<HTMLTextAreaElement>(null);
   const stickToBottom = useRef(true);
+  const [showInstructions, setShowInstructions] = useState(false);
   const empty = messages.length === 0;
   const streamingMessage = [...messages].reverse().find((message) => message.streaming);
-  const showThinking = thinking && (!streamingMessage || !streamingMessage.content);
+  const showThinking =
+    thinking && activity.length === 0 && (!streamingMessage || !streamingMessage.content);
 
   useEffect(() => {
     const node = scroller.current;
@@ -75,7 +91,7 @@ export function AssistantWorkspace() {
       typeof window !== "undefined" &&
       window.matchMedia("(prefers-reduced-motion: reduce)").matches;
     node.scrollTo({ top: node.scrollHeight, behavior: reduceMotion ? "auto" : "smooth" });
-  }, [messages, busy, thinking, empty]);
+  }, [messages, busy, thinking, activity, empty]);
 
   useEffect(() => {
     const el = field.current;
@@ -86,14 +102,14 @@ export function AssistantWorkspace() {
 
   function onSubmit(event: React.FormEvent) {
     event.preventDefault();
-    if (busy || !draft.trim()) return;
+    if (!draft.trim()) return;
     void send();
   }
 
   function onKeyDown(event: React.KeyboardEvent<HTMLTextAreaElement>) {
     if (event.key === "Enter" && !event.shiftKey) {
       event.preventDefault();
-      if (!busy && draft.trim()) void send();
+      if (draft.trim()) void send();
     }
   }
 
@@ -104,10 +120,73 @@ export function AssistantWorkspace() {
           role="status"
           className="ai-banner animate-fade shrink-0 px-3 py-2 text-center text-[12px] leading-snug text-muted-foreground sm:px-4 sm:py-2.5 sm:text-sm md:px-8"
         >
-          Full cloud AI is not connected yet. You can still talk naturally for tasks,
-          checklists, and dates — add an OpenAI key for ChatGPT-level understanding.
+          Full cloud AI is not connected yet. Local agent modes still work — add an OpenAI key
+          for deeper Cursor-style reasoning.
         </div>
       )}
+
+      <div className="shrink-0 border-b border-border/50 px-3 py-2 sm:px-4 md:px-6">
+        <div className="mx-auto flex w-full max-w-[42rem] flex-wrap items-center justify-between gap-2">
+          <div
+            className="inline-flex rounded-full border border-border/70 bg-surface-soft/80 p-0.5"
+            role="tablist"
+            aria-label="Assistant mode"
+          >
+            {MODES.map((mode) => (
+              <button
+                key={mode.id}
+                type="button"
+                role="tab"
+                aria-selected={agentMode === mode.id}
+                title={mode.hint}
+                onClick={() => setAgentMode(mode.id)}
+                className={cn(
+                  "rounded-full px-2.5 py-1 text-[11px] font-medium transition sm:px-3 sm:text-xs",
+                  agentMode === mode.id
+                    ? "bg-foreground text-background"
+                    : "text-muted-foreground hover:text-foreground"
+                )}
+              >
+                {mode.label}
+              </button>
+            ))}
+          </div>
+          <div className="flex items-center gap-1.5">
+            <button
+              type="button"
+              onClick={() => setShowInstructions((value) => !value)}
+              className="rounded-lg px-2 py-1 text-[11px] text-muted-foreground hover:bg-surface-soft hover:text-foreground sm:text-xs"
+            >
+              Rules
+            </button>
+            <button
+              type="button"
+              onClick={() => void regenerate()}
+              disabled={busy || empty}
+              className="inline-flex items-center gap-1 rounded-lg px-2 py-1 text-[11px] text-muted-foreground hover:bg-surface-soft hover:text-foreground disabled:opacity-40 sm:text-xs"
+              title="Regenerate last reply"
+            >
+              <RotateCcw className="h-3 w-3" />
+              Retry
+            </button>
+          </div>
+        </div>
+        {showInstructions && (
+          <div className="mx-auto mt-2 w-full max-w-[42rem]">
+            <label htmlFor="agent-rules" className="sr-only">
+              Custom agent instructions
+            </label>
+            <textarea
+              id="agent-rules"
+              value={customInstructions}
+              onChange={(event) => setCustomInstructions(event.target.value)}
+              rows={3}
+              placeholder="Custom instructions (like Cursor rules) — e.g. prefer checklists for shopping, keep replies short…"
+              className="w-full resize-y rounded-xl border border-border/70 bg-background/80 px-3 py-2 text-[12px] leading-relaxed text-foreground outline-none ring-0 placeholder:text-muted-foreground focus:border-foreground/30 sm:text-[13px]"
+            />
+          </div>
+        )}
+      </div>
 
       <div ref={scroller} className="min-h-0 min-w-0 flex-1 overflow-x-hidden overflow-y-auto">
         <div
@@ -128,9 +207,8 @@ export function AssistantWorkspace() {
                 Hello, what would you like to get organized today?
               </h1>
               <p className="mx-auto mt-2 max-w-md text-pretty text-[13px] leading-relaxed text-muted-foreground sm:mt-3 sm:text-[15px]">
-                Talk naturally — like a friend. Typos, slang, and incomplete
-                sentences are fine. I&apos;ll figure out the intent and update your
-                tasks, checklists, and dates.
+                Cursor-style agent for your life: Agent writes, Plan outlines, Ask only reads.
+                Try /plan, /ask, /undo, or /help.
               </p>
               <div className="mt-4 flex flex-wrap justify-center gap-1.5 sm:mt-6 sm:gap-2">
                 {PROMPTS.map((prompt, index) => (
@@ -138,7 +216,6 @@ export function AssistantWorkspace() {
                     key={prompt}
                     type="button"
                     onClick={() => void send(prompt)}
-                    disabled={busy}
                     className="ai-suggestion animate-fade-up max-w-full text-[12px] sm:text-sm"
                     style={{ animationDelay: `${80 + index * 60}ms` }}
                   >
@@ -180,6 +257,26 @@ export function AssistantWorkspace() {
             </article>
           ))}
 
+          {activity.length > 0 && (
+            <div
+              className="animate-message-in rounded-xl border border-border/60 bg-surface-soft/70 px-3 py-2 text-[12px] text-muted-foreground"
+              role="status"
+              aria-live="polite"
+            >
+              <p className="text-[10px] font-medium uppercase tracking-wide">Working</p>
+              <ul className="mt-1 space-y-1">
+                {activity.map((step, index) => (
+                  <li key={`${step.name}-${index}`} className="flex items-center gap-2">
+                    <span aria-hidden>
+                      {step.status === "done" ? "✓" : step.status === "error" ? "!" : "…"}
+                    </span>
+                    <span>{step.label}</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+
           {showThinking && (
             <div
               className="animate-message-in flex items-center gap-2 text-sm text-muted-foreground"
@@ -209,8 +306,7 @@ export function AssistantWorkspace() {
                     setDraft(prompt);
                     field.current?.focus();
                   }}
-                  disabled={busy}
-                  className="ai-suggestion shrink-0 !rounded-lg !px-2.5 !py-1 text-[11px] sm:!rounded-xl sm:!px-3 sm:!py-1.5 sm:text-xs disabled:opacity-50"
+                  className="ai-suggestion shrink-0 !rounded-lg !px-2.5 !py-1 text-[11px] sm:!rounded-xl sm:!px-3 sm:!py-1.5 sm:text-xs"
                 >
                   {prompt}
                 </button>
@@ -235,10 +331,15 @@ export function AssistantWorkspace() {
               onChange={(event) => setDraft(event.target.value)}
               onKeyDown={onKeyDown}
               rows={1}
-              disabled={busy}
-              placeholder="Say anything — remind me, what's left, plan my day…"
+              placeholder={
+                agentMode === "plan"
+                  ? "Plan mode — outline steps without changing data…"
+                  : agentMode === "ask"
+                    ? "Ask mode — questions only, no writes…"
+                    : "Agent mode — say anything, or /plan /ask /undo /help…"
+              }
               style={{ border: "none", outline: "none", boxShadow: "none" }}
-              className="max-h-36 min-h-[44px] min-w-0 flex-1 resize-none border-0 bg-transparent px-2.5 py-2.5 text-[14px] leading-relaxed text-foreground shadow-none outline-none ring-0 focus:border-0 focus:outline-none focus:ring-0 focus-visible:outline-none focus-visible:ring-0 placeholder:truncate placeholder:text-muted-foreground disabled:cursor-not-allowed sm:min-h-[48px] sm:px-3 sm:py-3 sm:text-[15px]"
+              className="max-h-36 min-h-[44px] min-w-0 flex-1 resize-none border-0 bg-transparent px-2.5 py-2.5 text-[14px] leading-relaxed text-foreground shadow-none outline-none ring-0 focus:border-0 focus:outline-none focus:ring-0 focus-visible:outline-none focus-visible:ring-0 placeholder:truncate placeholder:text-muted-foreground sm:min-h-[48px] sm:px-3 sm:py-3 sm:text-[15px]"
             />
             {busy ? (
               <Button
@@ -266,8 +367,10 @@ export function AssistantWorkspace() {
 
           <p className="mt-1.5 px-1 text-center text-[10px] leading-snug text-muted-foreground sm:mt-2 sm:text-[11px]">
             {busy
-              ? "Generating a reply · tap stop to cancel"
-              : "only use the options that are given for prompts"}
+              ? queueLength > 0
+                ? `Working · ${queueLength} queued · tap stop to cancel`
+                : "Working · tap stop to cancel"
+              : `${agentMode === "agent" ? "Agent" : agentMode === "plan" ? "Plan" : "Ask"} mode · /help for commands`}
           </p>
         </form>
       </div>

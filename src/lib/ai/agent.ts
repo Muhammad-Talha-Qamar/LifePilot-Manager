@@ -11,6 +11,14 @@ import {
   listProjects,
   listTasks,
 } from "@/lib/data/repository";
+import {
+  type AgentMode,
+  isWriteTool,
+  modeAllowsTool,
+  modeSystemAddon,
+  suggestFollowUps,
+  toolActivityLabel,
+} from "./agent-mode";
 import { blocksFromToolCalls } from "./blocks";
 import { rewriteIntent } from "./intent";
 import { runLocalCommand } from "./local-agent";
@@ -23,7 +31,13 @@ import {
 } from "./phrasebook";
 import { executeTool, TOOL_DEFINITIONS } from "./tools";
 import type { Task } from "@/types";
-import type { AssistantBlock, Board, ConversationContext, ScheduleQueryResult } from "./types";
+import type {
+  AgentStep,
+  AssistantBlock,
+  Board,
+  ConversationContext,
+  ScheduleQueryResult,
+} from "./types";
 import { emptyContext } from "./types";
 import { understandInput } from "./understand";
 import { applyUndoEntry, snapshotForUndo, undoEntryFor } from "./undo";
@@ -34,7 +48,8 @@ const REQUEST_TIMEOUT_MS = 45000;
 
 export type AgentStreamEvent =
   | { type: "status"; status: "thinking" | "working" }
-  | { type: "delta"; text: string };
+  | { type: "delta"; text: string }
+  | { type: "tool"; name: string; label: string; status: "running" | "done" | "error" };
 
 export interface ChatMessage {
   role: "user" | "assistant" | "system";
@@ -53,6 +68,8 @@ export interface AgentResult {
     error?: string;
   }[];
   mode: "model" | "local";
+  agentMode: AgentMode;
+  followUps: string[];
   openaiConfigured: boolean;
   demoFallback?: boolean;
   error?: string;
@@ -62,7 +79,9 @@ function buildSystemPrompt(
   auth: AuthContext,
   timezone: string,
   context: ConversationContext,
-  nluHint?: string
+  nluHint?: string,
+  agentMode: AgentMode = "agent",
+  customInstructions?: string
 ): string {
   const now = formatInTimeZone(new Date(), timezone, "yyyy-MM-dd HH:mm zzz");
   const focus = context.focus
@@ -94,6 +113,8 @@ Timezone: ${timezone}
 Current local datetime: ${now}
 Week starts on: Monday unless a tool result says otherwise.
 
+${modeSystemAddon(agentMode)}
+${customInstructions?.trim() ? `\n## User custom instructions\n${customInstructions.trim().slice(0, 2000)}\n` : ""}
 ## Conversation references
 Use these ids; do not invent records.
 Focus: ${focus}
@@ -365,6 +386,8 @@ export async function runAgent(
     context?: ConversationContext;
     confirm?: { tool: string; args: Record<string, unknown> };
     dismissPending?: boolean;
+    agentMode?: AgentMode;
+    customInstructions?: string;
     onEvent?: (event: AgentStreamEvent) => void;
     signal?: AbortSignal;
   }
@@ -372,24 +395,51 @@ export async function runAgent(
   const context = contextLines(options?.context ?? {});
   const openaiConfigured = isOpenAIConfigured();
   const toolCalls: AgentResult["toolCalls"] = [];
+  const agentSteps: AgentStep[] = [];
+  const agentMode: AgentMode = options?.agentMode ?? "agent";
   const prefs = await getPreferences(auth);
   const timezone = prefs.timezone || auth.profile.timezone || DEFAULT_TIMEZONE;
   const emit = options?.onEvent;
   const signal = options?.signal;
+  const userMessage =
+    [...(messages ?? [])].reverse().find((message) => message.role === "user")?.content ?? "";
 
   const finish = (
     message: string,
     extra: Partial<AgentResult> = {}
-  ): AgentResult => ({
-    message,
-    blocks: extra.blocks ?? [],
-    context,
-    toolCalls,
-    mode: extra.mode ?? (openaiConfigured ? "model" : "local"),
-    openaiConfigured,
-    demoFallback: extra.demoFallback,
-    error: extra.error,
-  });
+  ): AgentResult => {
+    const baseBlocks = [...(extra.blocks ?? [])];
+    if (agentSteps.length) {
+      baseBlocks.unshift({
+        type: "steps",
+        title: agentMode === "plan" ? "Plan investigation" : "Agent activity",
+        steps: agentSteps,
+      });
+    }
+    const followUps =
+      extra.followUps ??
+      suggestFollowUps({
+        userMessage,
+        assistantMessage: message,
+        toolNames: toolCalls.map((call) => call.name),
+        agentMode,
+      });
+    if (followUps.length) {
+      baseBlocks.push({ type: "followups", suggestions: followUps });
+    }
+    return {
+      message,
+      blocks: baseBlocks,
+      context,
+      toolCalls,
+      mode: extra.mode ?? (openaiConfigured ? "model" : "local"),
+      agentMode,
+      followUps,
+      openaiConfigured,
+      demoFallback: extra.demoFallback,
+      error: extra.error,
+    };
+  };
 
   const ensureNotAborted = () => {
     if (signal?.aborted) {
@@ -405,6 +455,9 @@ export async function runAgent(
   }
 
   if (options?.confirm) {
+    if (agentMode !== "agent") {
+      return finish("Switch to Agent mode to confirm deletes. Nothing was changed.");
+    }
     const allowed = new Set(["delete_task", "delete_checklist", "delete_event"]);
     if (!allowed.has(options.confirm.tool)) {
       return finish("That confirmation is not for a delete, so I did not change anything.", {
@@ -436,15 +489,83 @@ export async function runAgent(
     });
   }
 
-  const userMessage = [...messages].reverse().find((message) => message.role === "user")?.content ?? "";
+  const runTool = async (name: string, args: Record<string, unknown>) => {
+    if (!modeAllowsTool(agentMode, name)) {
+      const blocked = {
+        success: false as const,
+        result: null,
+        error:
+          agentMode === "plan"
+            ? "Plan mode is read-only. Switch to Agent mode to make changes."
+            : "Ask mode is read-only. Switch to Agent mode to make changes.",
+      };
+      emit?.({
+        type: "tool",
+        name,
+        label: toolActivityLabel(name),
+        status: "error",
+      });
+      agentSteps.push({
+        name,
+        label: toolActivityLabel(name),
+        status: "error",
+      });
+      return blocked;
+    }
+
+    const label = toolActivityLabel(name);
+    emit?.({ type: "tool", name, label, status: "running" });
+    const step: AgentStep = { name, label, status: "running" };
+    agentSteps.push(step);
+
+    const executed = await trackedTool(name, args, auth, context);
+    step.status = executed.success ? "done" : "error";
+    emit?.({
+      type: "tool",
+      name,
+      label,
+      status: executed.success ? "done" : "error",
+    });
+    return executed;
+  };
 
   const runLocal = async (demoFallback: boolean): Promise<AgentResult> => {
     emit?.({ type: "status", status: "working" });
+
+    // Plan mode without cloud model: describe the interpreted action, don't write.
+    if (agentMode === "plan") {
+      const understood = understandInput(userMessage);
+      const rewritten =
+        understood.kind === "command" ? understood.text : rewriteIntent(userMessage);
+      return finish(
+        [
+          "Plan mode — I won't change anything yet.",
+          "",
+          `Interpreted request: ${rewritten || userMessage}`,
+          "",
+          "Suggested steps:",
+          "1. Confirm the records involved (search / schedule check).",
+          "2. Apply the create / update / complete actions in Agent mode.",
+          "3. Verify the result and offer undo if needed.",
+          "",
+          "Say /agent and repeat the request (or tap Agent) when you want me to execute.",
+        ].join("\n"),
+        { mode: "local", demoFallback }
+      );
+    }
+
     const board = await loadBoard(auth);
     ensureNotAborted();
     const local = await runLocalCommand(userMessage, context, board, async (name, args) => {
       ensureNotAborted();
-      const executed = await trackedTool(name, args, auth, context);
+      if (agentMode === "ask" && isWriteTool(name)) {
+        return {
+          success: false,
+          result: null,
+          error: "Ask mode is read-only. Switch to Agent mode to make changes.",
+        };
+      }
+      const executed = await runTool(name, args);
       toolCalls.push({
         name,
         arguments: args,
@@ -457,6 +578,17 @@ export async function runAgent(
     const undo = context.undo;
     Object.assign(context, local.context);
     context.undo = undo;
+
+    if (
+      agentMode === "ask" &&
+      toolCalls.some((call) => isWriteTool(call.name) && !call.success)
+    ) {
+      return finish(
+        `${local.message}\n\n(Ask mode is read-only — switch to Agent to make changes.)`,
+        { blocks: local.blocks, mode: "local", demoFallback }
+      );
+    }
+
     return finish(local.message, {
       blocks: local.blocks,
       mode: "local",
@@ -475,8 +607,21 @@ export async function runAgent(
   });
 
   const nluHint = buildNluHint(userMessage);
+  const availableTools = TOOL_DEFINITIONS.filter((tool) =>
+    modeAllowsTool(agentMode, tool.function.name)
+  );
   const openaiMessages: OpenAI.Chat.Completions.ChatCompletionMessageParam[] = [
-    { role: "system", content: buildSystemPrompt(auth, timezone, context, nluHint) },
+    {
+      role: "system",
+      content: buildSystemPrompt(
+        auth,
+        timezone,
+        context,
+        nluHint,
+        agentMode,
+        options?.customInstructions
+      ),
+    },
     ...messages.map((message) => ({
       role: message.role as "user" | "assistant",
       content: message.content,
@@ -493,7 +638,7 @@ export async function runAgent(
         {
           model: getOpenAIModel(),
           messages: openaiMessages,
-          tools: TOOL_DEFINITIONS as unknown as OpenAI.Chat.Completions.ChatCompletionTool[],
+          tools: availableTools as unknown as OpenAI.Chat.Completions.ChatCompletionTool[],
           tool_choice: "auto",
           temperature: 0.15,
         },
@@ -540,7 +685,7 @@ export async function runAgent(
           args = {};
         }
 
-        const executed = await trackedTool(call.function.name, args, auth, context);
+        const executed = await runTool(call.function.name, args);
         toolCalls.push({
           name: call.function.name,
           arguments: args,
