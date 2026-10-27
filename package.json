@@ -3,6 +3,8 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
+    "env:setup": "node scripts/env-setup.mjs",
+    "predev": "node scripts/env-setup.mjs",
     "dev": "next dev --turbopack",
     "build": "next build",
     "start": "next start",

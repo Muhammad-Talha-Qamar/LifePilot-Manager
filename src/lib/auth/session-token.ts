@@ -1,3 +1,5 @@
+import { getSessionSecret } from "@/lib/config";
+
 export const SESSION_COOKIE = "lp_session";
 const SESSION_DAYS = 30;
 
@@ -9,11 +11,7 @@ export interface SessionPayload {
 }
 
 function sessionSecret(): string {
-  return (
-    process.env.LIFEPILOT_SESSION_SECRET ||
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ||
-    "lifepilot-local-session-secret"
-  );
+  return getSessionSecret();
 }
 
 function toBase64Url(bytes: ArrayBuffer | Uint8Array): string {

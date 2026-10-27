@@ -6,10 +6,11 @@ AI-first personal task manager. The home route opens the assistant; tasks, check
 
 ```bash
 npm install
-npm run dev
+npm run env:setup   # copies .env.example → .env (skips if .env already exists)
+npm run dev         # also runs env:setup via predev
 ```
 
-Open [http://localhost:3000](http://localhost:3000). Do not open a static HTML file with Live Server — use the Next.js dev server (`npm run dev`).
+Open [http://localhost:3000](http://localhost:3000). Do not open a static HTML file with Live Server — use the Next.js dev server.
 
 ```bash
 npm run typecheck
@@ -18,24 +19,26 @@ npm run lint
 npm run build
 ```
 
+## Environment
+
+All keys are documented in **`.env.example`**. Local secrets go in **`.env`** (gitignored). Next.js loads `.env` automatically.
+
+| Key | Purpose |
+| --- | --- |
+| `LIFEPILOT_FORCE_DEMO` / `NEXT_PUBLIC_LIFEPILOT_FORCE_DEMO` | Demo Create account / Sign in via `/api/auth` |
+| `LIFEPILOT_SESSION_SECRET` | Signs session cookies |
+| `NEXT_PUBLIC_SUPABASE_URL` / `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Real auth (set FORCE_DEMO to false) |
+| `OPENAI_API_KEY` / `OPENAI_MODEL` | Cloud AI (optional; local agent otherwise) |
+
 ## Sign-in
 
-The app always opens on **Sign in / Create account**. New accounts start with an empty board (no sample tasks or checklists).
+The app always opens on **Sign in / Create account**. New accounts start with an empty board.
 
-Without Supabase env vars, the app runs in **demo mode**:
-- Locally: accounts/data live in `.demo-users.json` + `.demo-data/`
-- On Netlify: the same demo API uses **Netlify Blobs** (the function filesystem is read-only, so file writes fail with “read-only file system”)
+Without Supabase (demo mode — default in `.env.example`):
+- Locally: `.demo-users.json` + `.demo-data/`
+- On Netlify: Netlify Blobs + signed roster cookie
 
-With Supabase configured, auth and data use your project (recommended for real use).
-
-Optional env:
-
-- `NEXT_PUBLIC_SUPABASE_URL`
-- `NEXT_PUBLIC_SUPABASE_ANON_KEY`
-- `SUPABASE_SERVICE_ROLE_KEY` (if your setup uses server-side admin APIs)
-- `LIFEPILOT_SESSION_SECRET` (local account cookies)
-- `OPENAI_API_KEY` (falls back to the local rule-based agent if unset)
-- `OPENAI_MODEL` (default `gpt-4o-mini`)
+With Supabase configured and FORCE_DEMO off, auth and data use your project.
 
 ## Deploy on Netlify
 
