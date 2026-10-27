@@ -46,7 +46,6 @@ export function AssistantWorkspace() {
     busy,
     thinking,
     openaiConfigured,
-    mode,
     send,
     stop,
   } = useAssistant();
@@ -273,11 +272,7 @@ export function AssistantWorkspace() {
           <p className="mt-1.5 px-1 text-center text-[10px] leading-snug text-muted-foreground sm:mt-2 sm:text-[11px]">
             {busy
               ? "Generating a reply · tap stop to cancel"
-              : openaiConfigured
-                ? "Enter to send · Shift+Enter for a new line"
-                : mode === "local"
-                  ? "only use the options that are given for prompts"
-                  : "Enter to send · Shift+Enter for a new line"}
+              : "only use the options that are given for prompts"}
           </p>
         </form>
       </div>
