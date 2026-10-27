@@ -12,7 +12,6 @@ const PROMPTS = [
   "What should I finish today?",
   "Remind me to call mom tomorrow",
   "Plan my day",
-  "Create a project called _________",
   "Create a checklist for groceries with milk and eggs",
 ];
 
@@ -104,7 +103,7 @@ export function AssistantWorkspace() {
           className="ai-banner animate-fade shrink-0 px-3 py-2 text-center text-[12px] leading-snug text-muted-foreground sm:px-4 sm:py-2.5 sm:text-sm md:px-8"
         >
           Full conversational AI is not connected yet. Clear requests still work for tasks,
-          checklists, projects, and dates.
+          checklists, and dates.
         </div>
       )}
 
@@ -127,7 +126,7 @@ export function AssistantWorkspace() {
                 Hello, what would you like to get organized today?
               </h1>
               <p className="mx-auto mt-2 max-w-md text-pretty text-[13px] leading-relaxed text-muted-foreground sm:mt-3 sm:text-[15px]">
-                Tell me what you need to do. I&apos;ll help you organize your tasks, projects,
+                Tell me what you need to do. I&apos;ll help you organize your tasks,
                 checklists, and important dates.
               </p>
               <div className="mt-4 flex flex-wrap justify-center gap-1.5 sm:mt-6 sm:gap-2">
@@ -135,14 +134,7 @@ export function AssistantWorkspace() {
                   <button
                     key={prompt}
                     type="button"
-                    onClick={() => {
-                      if (prompt.includes("_________")) {
-                        setDraft(prompt);
-                        field.current?.focus();
-                        return;
-                      }
-                      void send(prompt);
-                    }}
+                    onClick={() => void send(prompt)}
                     disabled={busy}
                     className="ai-suggestion animate-fade-up max-w-full text-[12px] sm:text-sm"
                     style={{ animationDelay: `${80 + index * 60}ms` }}

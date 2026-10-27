@@ -94,8 +94,8 @@ export default function SettingsPage() {
           {openai === null
             ? "Checking whether the AI assistant is connected…"
             : openai
-              ? "The AI assistant is connected and can help with open-ended requests using your saved tasks and projects."
-              : "The full AI assistant is not connected yet. Clear requests still work for tasks, checklists, projects, and dates. An administrator can connect the AI service for richer conversation."}
+              ? "The AI assistant is connected and can help with open-ended requests using your saved tasks and checklists."
+              : "The full AI assistant is not connected yet. Clear requests still work for tasks, checklists, and dates. An administrator can connect the AI service for richer conversation."}
         </p>
       </section>
 

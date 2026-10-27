@@ -19,7 +19,7 @@ const outfit = Outfit({
 export const metadata: Metadata = {
   title: "LifePilot",
   description:
-    "AI-powered personal productivity: tasks, checklists, calendar, projects, and an intelligent assistant.",
+    "AI-powered personal productivity: tasks, checklists, calendar, and an intelligent assistant.",
   applicationName: "LifePilot",
   icons: {
     icon: [

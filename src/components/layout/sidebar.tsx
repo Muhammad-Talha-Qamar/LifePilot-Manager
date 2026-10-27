@@ -5,7 +5,6 @@ import { usePathname, useRouter } from "next/navigation";
 import {
   CalendarDays,
   CheckSquare,
-  FolderKanban,
   LayoutDashboard,
   ListTodo,
   Menu,
@@ -29,7 +28,6 @@ const mainNav = [
   { href: "/", label: "AI Assistant", icon: MessageSquare, match: ["/", "/assistant"] },
   { href: "/tasks", label: "Tasks", icon: ListTodo },
   { href: "/checklists", label: "Checklists", icon: CheckSquare },
-  { href: "/projects", label: "Projects", icon: FolderKanban },
   { href: "/calendar", label: "Calendar", icon: CalendarDays },
   { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
 ];

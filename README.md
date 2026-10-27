@@ -1,6 +1,6 @@
 # LifePilot
 
-AI-first personal task manager. The home route opens the assistant; tasks, checklists, projects, and calendar stay one click away.
+AI-first personal task manager. The home route opens the assistant; tasks, checklists, and calendar stay one click away.
 
 ## Local development
 

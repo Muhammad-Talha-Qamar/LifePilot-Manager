@@ -14,7 +14,7 @@ import {
 import { blocksFromToolCalls } from "./blocks";
 import { runLocalCommand } from "./local-agent";
 import { executeTool, TOOL_DEFINITIONS } from "./tools";
-import type { Project, Task } from "@/types";
+import type { Task } from "@/types";
 import type { AssistantBlock, Board, ConversationContext, ScheduleQueryResult } from "./types";
 import { emptyContext } from "./types";
 import { applyUndoEntry, snapshotForUndo, undoEntryFor } from "./undo";
@@ -62,7 +62,7 @@ function buildSystemPrompt(
     .slice(0, 8)
     .map((task, index) => `${index + 1}. ${task.title} (${task.id})`)
     .join("\n");
-  return `You are LifePilot, a friendly personal productivity assistant. You help people organize tasks, checklists, projects, calendar events, and reminders by changing real saved records through tools.
+  return `You are LifePilot, a friendly personal productivity assistant. You help people organize tasks, checklists, calendar events, and reminders by changing real saved records through tools. This product does not support projects — never create, list, update, delete, or mention projects. Suggest tasks or checklists instead.
 
 User: ${auth.profile.full_name ?? auth.email}
 Timezone: ${timezone}
@@ -71,7 +71,6 @@ Week starts on: Monday unless a tool result says otherwise.
 
 Conversation references (use these ids; do not invent records):
 Focus: ${focus}
-Last project: ${context.lastProject ? `${context.lastProject.name} (${context.lastProject.id})` : "none"}
 Last checklist: ${context.lastChecklist ? `${context.lastChecklist.title} (${context.lastChecklist.id})` : "none"}
 Recently discussed tasks:
 ${tasks || "none"}
@@ -82,10 +81,10 @@ How to talk:
 - If a tool returns a technical error, explain the problem in simple words and say whether the action succeeded, partly succeeded, or failed. Offer a helpful next step. Do not invent a cause.
 - Match the user's language when possible. Understand typos, slang, incomplete sentences, and any natural phrasing (e.g. "remind me to…", "done with…", "today?", bare titles with dates) without correcting them rudely. Infer the intent and act; only ask a short question when truly ambiguous.
 - Prefer phrases like "Your task has been updated" over technical phrasing like "mutation completed".
-- Keep replies concise. The interface already shows task, checklist, project, and schedule cards from tool results.
+- Keep replies concise. The interface already shows task, checklist, and schedule cards from tool results.
 
 Rules:
-1. Never invent a task, event, project, checklist, deadline, or completion status. If a tool does not return it, it does not exist.
+1. Never invent a task, event, checklist, deadline, or completion status. If a tool does not return it, it does not exist.
 2. For any question about today, tomorrow, yesterday, this week, next week, this month, next month, the next 7 days, overdue work, or tasks without deadlines, call query_schedule. Next month means the next calendar month, not the next 30 days.
 3. Do not treat tasks without a deadline as due today. Do not list completed tasks as unfinished.
 4. Resolve pronouns such as "it", "that task", and "the second one" from the conversation references above. If search_records returns several close matches, ask which one. Do not guess.
@@ -180,12 +179,6 @@ function absorbRecord(context: ConversationContext, name: string, result: unknow
       ...(context.lastTasks ?? []).filter((item) => item.id !== task.id),
     ].slice(0, 20);
   }
-  if (name === "create_project" || name === "update_project") {
-    const project = result as Project;
-    if (!project.id || !project.name) return;
-    context.focus = { kind: "project", id: project.id, label: project.name, detail: project.deadline };
-    context.lastProject = { id: project.id, name: project.name };
-  }
   if (
     name === "create_checklist" ||
     name === "add_checklist_items" ||
@@ -241,10 +234,6 @@ function toolLabel(name: string): string {
     add_checklist_items: "adding checklist items",
     complete_checklist_items: "completing checklist items",
     delete_checklist: "deleting a checklist",
-    create_project: "creating a project",
-    update_project: "updating a project",
-    delete_project: "deleting a project",
-    move_tasks_to_project: "moving tasks",
     create_event: "saving an event",
     update_event: "updating an event",
     delete_event: "deleting an event",
@@ -366,7 +355,7 @@ export async function runAgent(
   }
 
   if (options?.confirm) {
-    const allowed = new Set(["delete_task", "delete_checklist", "delete_project", "delete_event"]);
+    const allowed = new Set(["delete_task", "delete_checklist", "delete_event"]);
     if (!allowed.has(options.confirm.tool)) {
       return finish("That confirmation is not for a delete, so I did not change anything.", {
         error: "unsupported_confirm",
@@ -567,8 +556,7 @@ export async function generateDailyBriefing(auth: AuthContext): Promise<string> 
   const fallback = [
     `You have ${summary.today_tasks.length} task(s) due today`,
     `${summary.overdue_tasks.length} overdue`,
-    `${summary.upcoming_events.length} upcoming event(s)`,
-    `and ${summary.active_projects.length} active project(s).`,
+    `and ${summary.upcoming_events.length} upcoming event(s).`,
     summary.overdue_tasks.length
       ? `Prioritize: ${summary.overdue_tasks
           .slice(0, 3)

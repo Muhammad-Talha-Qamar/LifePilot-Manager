@@ -19,7 +19,7 @@ import {
   interruptedMessage,
 } from "@/lib/ai/user-messages";
 import { prefersReducedMotion, revealText } from "@/lib/ai/typing";
-import type { Checklist, ChecklistItem, Project, Task } from "@/types";
+import type { Checklist, ChecklistItem, Task } from "@/types";
 
 const STORAGE_KEY = "lifepilot-assistant-v1";
 const WRITE_TOOLS = new Set([
@@ -33,10 +33,6 @@ const WRITE_TOOLS = new Set([
   "add_checklist_items",
   "complete_checklist_items",
   "delete_checklist",
-  "create_project",
-  "update_project",
-  "delete_project",
-  "move_tasks_to_project",
   "create_event",
   "update_event",
   "delete_event",
@@ -88,7 +84,6 @@ function newId() {
 }
 
 type ChecklistRow = Checklist & { items: ChecklistItem[] };
-type ProjectRow = Project & { progress?: { percent: number } };
 
 async function readSseChat(
   body: Record<string, unknown>,
@@ -267,94 +262,63 @@ export function AssistantProvider({ children }: { children: React.ReactNode }) {
 
   const refreshRecords = useCallback(async () => {
     try {
-      const [tasks, checklists, projects] = await Promise.all([
+      const [tasks, checklists] = await Promise.all([
         api<Task[]>("/api/tasks"),
         api<ChecklistRow[]>("/api/checklists"),
-        api<ProjectRow[]>("/api/projects"),
       ]);
-      const projectName = new Map(projects.map((project) => [project.id, project.name]));
       const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone || "Asia/Karachi";
       setMessages((current) =>
         current.map((message) => ({
           ...message,
-          blocks: message.blocks?.map((block) => {
-            if (block.type === "tasks") {
-              return {
-                ...block,
-                tasks: block.tasks.map((card) => {
-                  const fresh = tasks.find((task) => task.id === card.id);
-                  if (!fresh) return card;
-                  return {
-                    ...card,
-                    title: fresh.title,
-                    priority: fresh.priority,
-                    due_date: fresh.due_date,
-                    due_time: fresh.due_time,
-                    status: fresh.status,
-                    project_id: fresh.project_id,
-                    project_name: fresh.project_id
-                      ? projectName.get(fresh.project_id) ?? card.project_name
-                      : null,
-                    estimated_minutes: fresh.estimated_minutes,
-                    overdue: isOverdue(fresh.due_date, fresh.due_time, timezone, fresh.status),
-                  };
-                }),
-              };
-            }
-            if (block.type === "checklists") {
-              return {
-                ...block,
-                checklists: block.checklists.map((card) => {
-                  const fresh = checklists.find((checklist) => checklist.id === card.id);
-                  if (!fresh) return card;
-                  return {
-                    ...card,
-                    title: fresh.title,
-                    project_id: fresh.project_id,
-                    project_name: fresh.project_id
-                      ? projectName.get(fresh.project_id) ?? null
-                      : null,
-                    items: [...fresh.items]
-                      .sort((a, b) => a.position - b.position)
-                      .map((item) => ({
-                        id: item.id,
-                        title: item.title,
-                        is_completed: item.is_completed,
-                        position: item.position,
-                      })),
-                  };
-                }),
-              };
-            }
-            if (block.type === "projects") {
-              return {
-                ...block,
-                projects: block.projects.map((card) => {
-                  const fresh = projects.find((project) => project.id === card.id);
-                  if (!fresh) return card;
-                  return {
-                    ...card,
-                    name: fresh.name,
-                    description: fresh.description,
-                    status: fresh.status,
-                    priority: fresh.priority,
-                    deadline: fresh.deadline,
-                    progress_percent: fresh.progress?.percent ?? card.progress_percent,
-                    tasks: tasks
-                      .filter((task) => task.project_id === fresh.id)
-                      .slice(0, 8)
-                      .map((task) => ({
-                        id: task.id,
-                        title: task.title,
-                        status: task.status,
-                        due_date: task.due_date,
-                      })),
-                  };
-                }),
-              };
-            }
-            return block;
-          }),
+          blocks: message.blocks
+            ?.filter((block) => block.type !== "projects")
+            .map((block) => {
+              if (block.type === "tasks") {
+                return {
+                  ...block,
+                  tasks: block.tasks.map((card) => {
+                    const fresh = tasks.find((task) => task.id === card.id);
+                    if (!fresh) return card;
+                    return {
+                      ...card,
+                      title: fresh.title,
+                      priority: fresh.priority,
+                      due_date: fresh.due_date,
+                      due_time: fresh.due_time,
+                      status: fresh.status,
+                      project_id: null,
+                      project_name: null,
+                      estimated_minutes: fresh.estimated_minutes,
+                      overdue: isOverdue(fresh.due_date, fresh.due_time, timezone, fresh.status),
+                    };
+                  }),
+                };
+              }
+              if (block.type === "checklists") {
+                return {
+                  ...block,
+                  checklists: block.checklists.map((card) => {
+                    const fresh = checklists.find((checklist) => checklist.id === card.id);
+                    if (!fresh) return card;
+                    return {
+                      ...card,
+                      title: fresh.title,
+                      project_id: null,
+                      project_name: null,
+                      items: [...fresh.items]
+                        .sort((a, b) => a.position - b.position)
+                        .map((item) => ({
+                          id: item.id,
+                          title: item.title,
+                          is_completed: item.is_completed,
+                          position: item.position,
+                        })),
+                    };
+                  }),
+                };
+              }
+              return block;
+            }),
         }))
       );
     } catch {

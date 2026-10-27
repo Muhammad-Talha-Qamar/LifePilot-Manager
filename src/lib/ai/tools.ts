@@ -4,7 +4,6 @@ import {
   completeTask,
   createChecklist,
   createEvent,
-  createProject,
   createTask,
   deleteTask,
   getPreferences,
@@ -12,13 +11,11 @@ import {
   getTask,
   listChecklists,
   listEvents,
-  listProjects,
   listTasks,
   manageChecklistItem,
   savePreferences,
   updateChecklist,
   updateEvent,
-  updateProject,
   updateTask,
   getChecklistItems,
 } from "@/lib/data/repository";
@@ -28,14 +25,12 @@ import { sortTasksByPriorityThenDue as sortTasks } from "@/lib/utils/progress";
 import {
   createChecklistSchema,
   createEventSchema,
-  createProjectSchema,
   createTaskSchema,
   listTasksFilterSchema,
   manageChecklistItemsSchema,
   savePreferenceSchema,
   updateChecklistSchema,
   updateEventSchema,
-  updateProjectSchema,
   updateTaskSchema,
 } from "@/lib/validations/schemas";
 
@@ -299,57 +294,9 @@ export const TOOL_DEFINITIONS = [
   {
     type: "function" as const,
     function: {
-      name: "list_projects",
-      description: "List active projects.",
-      parameters: { type: "object", properties: {} },
-    },
-  },
-  {
-    type: "function" as const,
-    function: {
-      name: "create_project",
-      description: "Create a project.",
-      parameters: {
-        type: "object",
-        properties: {
-          name: { type: "string" },
-          description: { type: "string" },
-          status: { type: "string", enum: ["active", "on_hold", "completed", "archived"] },
-          priority: { type: "string", enum: ["low", "medium", "high", "urgent"] },
-          start_date: { type: "string" },
-          deadline: { type: "string" },
-        },
-        required: ["name"],
-      },
-    },
-  },
-  {
-    type: "function" as const,
-    function: {
-      name: "update_project",
-      description: "Update a project.",
-      parameters: {
-        type: "object",
-        properties: {
-          id: { type: "string" },
-          name: { type: "string" },
-          description: { type: "string" },
-          status: { type: "string" },
-          priority: { type: "string" },
-          start_date: { type: "string" },
-          deadline: { type: "string" },
-          is_archived: { type: "boolean" },
-        },
-        required: ["id"],
-      },
-    },
-  },
-  {
-    type: "function" as const,
-    function: {
       name: "get_productivity_summary",
       description:
-        "Get today's tasks, overdue work, upcoming deadlines/events, projects, and completion stats.",
+        "Get today's tasks, overdue work, upcoming deadlines/events, and completion stats.",
       parameters: { type: "object", properties: {} },
     },
   },
@@ -399,7 +346,7 @@ export const TOOL_DEFINITIONS = [
     function: {
       name: "query_schedule",
       description:
-        "Retrieve tasks, events, and project deadlines for a period. Use this for today, tomorrow, yesterday, this week, next week, this month, next month (calendar month, not 30 days), the next 7 days, overdue work, tasks without deadlines, or a custom YYYY-MM-DD range. Completed tasks are omitted from unfinished lists.",
+        "Retrieve tasks and events for a period. Use this for today, tomorrow, yesterday, this week, next week, this month, next month (calendar month, not 30 days), the next 7 days, overdue work, tasks without deadlines, or a custom YYYY-MM-DD range. Completed tasks are omitted from unfinished lists.",
       parameters: {
         type: "object",
         properties: {
@@ -431,29 +378,14 @@ export const TOOL_DEFINITIONS = [
     function: {
       name: "search_records",
       description:
-        "Find existing tasks, projects, or checklists by a fuzzy name before updating them. Use this to resolve references like 'that science task' instead of inventing ids.",
+        "Find existing tasks or checklists by a fuzzy name before updating them. Use this to resolve references like 'that science task' instead of inventing ids.",
       parameters: {
         type: "object",
         properties: {
           query: { type: "string" },
-          kind: { type: "string", enum: ["task", "project", "checklist", "event", "any"] },
+          kind: { type: "string", enum: ["task", "checklist", "event", "any"] },
         },
         required: ["query"],
-      },
-    },
-  },
-  {
-    type: "function" as const,
-    function: {
-      name: "move_tasks_to_project",
-      description: "Move existing tasks into a project. Verify the project and task ids with search first.",
-      parameters: {
-        type: "object",
-        properties: {
-          project_id: { type: "string" },
-          task_ids: { type: "array", items: { type: "string" } },
-        },
-        required: ["project_id", "task_ids"],
       },
     },
   },
@@ -493,21 +425,6 @@ export const TOOL_DEFINITIONS = [
     function: {
       name: "delete_checklist",
       description: "Delete a checklist after the user explicitly confirms.",
-      parameters: {
-        type: "object",
-        properties: {
-          id: { type: "string" },
-          confirmed: { type: "boolean" },
-        },
-        required: ["id", "confirmed"],
-      },
-    },
-  },
-  {
-    type: "function" as const,
-    function: {
-      name: "delete_project",
-      description: "Delete a project after the user explicitly confirms.",
       parameters: {
         type: "object",
         properties: {
@@ -663,29 +580,6 @@ export async function executeTool(
         const { id, ...patch } = input;
         const event = await updateEvent(id, patch, auth);
         return { success: true, result: event };
-      }
-      case "list_projects": {
-        const projects = await listProjects(auth);
-        return { success: true, result: projects };
-      }
-      case "create_project": {
-        const input = createProjectSchema.parse(rawArgs);
-        const project = await createProject(input, auth);
-        const verified = (await listProjects(auth)).find((item) => item.id === project.id);
-        if (!verified) {
-          return { success: false, result: null, error: "Project write could not be verified." };
-        }
-        return { success: true, result: verified };
-      }
-      case "update_project": {
-        const input = updateProjectSchema.parse(rawArgs);
-        const { id, ...patch } = input;
-        const project = await updateProject(id, patch, auth);
-        const verified = (await listProjects(auth)).find((item) => item.id === project.id);
-        if (!verified) {
-          return { success: false, result: null, error: "Project update could not be verified." };
-        }
-        return { success: true, result: verified };
       }
       case "get_productivity_summary": {
         const summary = await getProductivitySummary(auth);

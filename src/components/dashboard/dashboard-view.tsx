@@ -7,7 +7,6 @@ import {
   AlertTriangle,
   Calendar,
   CheckCircle2,
-  FolderKanban,
   ListTodo,
   Loader2,
   Plus,
@@ -29,14 +28,13 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { cn } from "@/lib/utils";
-import type { ProductivitySummary, Profile, Project, Reminder, Task } from "@/types";
+import type { ProductivitySummary, Profile, Reminder, Task } from "@/types";
 
 type DashboardData = {
   profile: Profile;
   isDemo: boolean;
   openaiConfigured: boolean;
   summary: ProductivitySummary;
-  projects: (Project & { progress: { percent: number } })[];
   reminders: Reminder[];
 };
 
@@ -311,48 +309,6 @@ export function DashboardView() {
           )}
         </SoftPanel>
       </div>
-
-      <SoftPanel
-        className="animate-fade-up"
-        title={
-          <span className="flex items-center gap-2">
-            <FolderKanban className="h-4 w-4 text-muted-foreground" />
-            Active projects
-          </span>
-        }
-        action={
-          <Button variant="ghost" size="sm" asChild>
-            <Link href="/projects">View all</Link>
-          </Button>
-        }
-      >
-        <div className="grid gap-2.5 sm:grid-cols-2">
-          {data.projects.length === 0 ? (
-            <p className="text-sm text-muted-foreground">No active projects.</p>
-          ) : (
-            data.projects.map((p) => (
-              <div
-                key={p.id}
-                className="lp-glass-soft hover-lift rounded-xl border p-3.5"
-              >
-                <div className="flex items-center justify-between gap-2">
-                  <p className="text-sm font-medium">{p.name}</p>
-                  <span className="text-xs font-medium text-primary">{p.progress.percent}%</span>
-                </div>
-                <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-muted">
-                  <div
-                    className="progress-bar-fill h-full rounded-full bg-primary"
-                    style={{ width: `${p.progress.percent}%` }}
-                  />
-                </div>
-                {p.deadline && (
-                  <p className="mt-2 text-xs text-muted-foreground">Deadline {p.deadline}</p>
-                )}
-              </div>
-            ))
-          )}
-        </div>
-      </SoftPanel>
 
       {data.reminders.length > 0 && (
         <SoftPanel title="Reminders" className="animate-fade-up">

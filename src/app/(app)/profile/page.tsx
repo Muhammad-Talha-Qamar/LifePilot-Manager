@@ -226,7 +226,7 @@ export default function ProfilePage() {
       >
         <h2 className="text-sm font-semibold">History with LifePilot</h2>
         <p className="mt-1 text-sm text-muted-foreground">
-          Account timeline only — not your tasks or projects.
+          Account timeline only — not your tasks or checklists.
         </p>
 
         {!me ? (

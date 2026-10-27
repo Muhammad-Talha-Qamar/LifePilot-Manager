@@ -385,8 +385,8 @@ describe("local assistant commands", () => {
     const { act, calls } = harness();
     const result = await runLocalCommand("What do I need to finish next month?", emptyContext(), board(), act);
     expect(calls[0].args).toMatchObject({ period: "next_month" });
-    expect(result.message).toContain("History Research Project");
     expect(result.message).toContain("November");
+    expect(result.message.toLowerCase()).not.toContain("project");
   });
 
   it("creates a task and corrects the date without a duplicate", async () => {
@@ -407,16 +407,17 @@ describe("local assistant commands", () => {
     expect(corrected.message).toContain("did not create a duplicate");
   });
 
-  it("follows project, checklist, and item references", async () => {
+  it("follows checklist and item references", async () => {
     const env = harness();
     let context: ConversationContext = emptyContext();
-    const project = await runLocalCommand("Create a project for my science exam.", context, env.board, env.act);
-    context = project.context;
-    expect(project.message).toContain("Science Exam");
-
-    const checklist = await runLocalCommand("Add a checklist to it.", context, env.board, env.act);
+    const checklist = await runLocalCommand(
+      "Create a checklist called Science Exam.",
+      context,
+      env.board,
+      env.act
+    );
     context = checklist.context;
-    expect(env.calls.at(-1)?.args.project_id).toBe("11111111-1111-4111-8111-111111111199");
+    expect(checklist.message).toContain("Science Exam");
 
     const items = await runLocalCommand("Add revising chapters 1 to 5.", context, env.board, env.act);
     context = items.context;
@@ -435,6 +436,18 @@ describe("local assistant commands", () => {
     expect(done.message).toContain("Revise chapter 2");
     const ids = env.calls.at(-1)?.args.item_ids as string[];
     expect(ids).toHaveLength(2);
+  });
+
+  it("rejects project commands", async () => {
+    const env = harness();
+    const result = await runLocalCommand(
+      "Create a project called Science Exam Preparation.",
+      emptyContext(),
+      env.board,
+      env.act
+    );
+    expect(result.message).toMatch(/aren't available/i);
+    expect(env.calls).toHaveLength(0);
   });
 
   it("asks when a task reference is ambiguous and does not write", async () => {
@@ -470,23 +483,16 @@ describe("local assistant commands", () => {
     expect(confirmed.message.toLowerCase()).not.toContain("removed");
   });
 
-  it("moves science tasks into the project just discussed", async () => {
+  it("rejects moving tasks into a project", async () => {
     const env = harness();
-    const created = await runLocalCommand(
-      "Create a project called Science Exam Preparation.",
+    const moved = await runLocalCommand(
+      "Move all my science revision tasks into that project.",
       emptyContext(),
       env.board,
       env.act
     );
-    const moved = await runLocalCommand(
-      "Move all my science revision tasks into that project.",
-      created.context,
-      env.board,
-      env.act
-    );
-    expect(moved.message).toContain("Submit science lab report");
-    expect(env.calls.at(-1)?.args.task_ids).toEqual(["44444444-4444-4444-8444-444444444403"]);
-    expect(moved.message).not.toContain("Finish maths homework");
+    expect(moved.message).toMatch(/aren't available/i);
+    expect(env.calls).toHaveLength(0);
   });
 
   it("creates checklists with items and adds to an existing list", async () => {
@@ -533,7 +539,7 @@ describe("local assistant commands", () => {
     expect(env.calls.some((call) => call.name === "delete_checklist")).toBe(true);
   });
 
-  it("creates a project with a deadline and moves one task into it", async () => {
+  it("rejects creating a project with a deadline", async () => {
     const env = harness();
     const created = await runLocalCommand(
       "Create a project called Midterms with deadline 2026-11-06",
@@ -541,20 +547,8 @@ describe("local assistant commands", () => {
       env.board,
       env.act
     );
-    expect(created.message).toContain("Midterms");
-    expect(created.message).not.toContain("with deadline 2026-11-06");
-    expect(env.calls[0]?.args.name).toBe("Midterms");
-    expect(env.calls[0]?.args.deadline).toBe("2026-11-06");
-
-    const moved = await runLocalCommand(
-      "Move Finish maths homework into Midterms",
-      created.context,
-      env.board,
-      env.act
-    );
-    expect(moved.message).toContain("Finish maths homework");
-    expect(moved.message).toContain("Midterms");
-    expect(env.calls.at(-1)?.name).toBe("move_tasks_to_project");
+    expect(created.message).toMatch(/aren't available/i);
+    expect(env.calls).toHaveLength(0);
   });
 
   it("saves a timed meeting without claiming it when the time is ambiguous", async () => {
@@ -582,7 +576,7 @@ describe("local assistant commands", () => {
     expect(String(args?.start_at)).toContain("2026-10-23");
   });
 
-  it("moves a project deadline to next Monday", async () => {
+  it("rejects changing a project deadline", async () => {
     const env = harness();
     const result = await runLocalCommand(
       "Change the deadline of my history project to next Monday.",
@@ -590,12 +584,8 @@ describe("local assistant commands", () => {
       env.board,
       env.act
     );
-    expect(env.calls.at(-1)).toMatchObject({
-      name: "update_project",
-      args: { deadline: "2026-10-26" },
-    });
-    expect(result.message).toContain("History Research Project");
-    expect(result.message).toContain("Oct 26");
+    expect(result.message).toMatch(/aren't available/i);
+    expect(env.calls).toHaveLength(0);
   });
 
   it("understands casual create, query, and complete phrasing", async () => {

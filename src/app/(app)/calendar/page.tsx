@@ -31,7 +31,6 @@ import type {
   CalendarEvent,
   Checklist,
   ChecklistItem,
-  Project,
   Task,
 } from "@/types";
 
@@ -52,7 +51,6 @@ function dayKey(value: string | null | undefined): string | null {
 export default function CalendarPage() {
   const [events, setEvents] = useState<CalendarEvent[]>([]);
   const [tasks, setTasks] = useState<Task[]>([]);
-  const [projects, setProjects] = useState<Project[]>([]);
   const [checklistItems, setChecklistItems] = useState<DatedChecklistItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [cursor, setCursor] = useState(() => startOfMonth(new Date()));
@@ -60,10 +58,9 @@ export default function CalendarPage() {
 
   const load = useCallback(async () => {
     try {
-      const [ev, ts, ps, cls] = await Promise.all([
+      const [ev, ts, cls] = await Promise.all([
         api<CalendarEvent[]>("/api/events"),
         api<Task[]>("/api/tasks"),
-        api<Project[]>("/api/projects"),
         api<ChecklistRow[]>("/api/checklists"),
       ]);
       setEvents(ev);
@@ -73,15 +70,6 @@ export default function CalendarPage() {
             dayKey(t.due_date) &&
             t.status !== "done" &&
             t.status !== "cancelled"
-        )
-      );
-      setProjects(
-        ps.filter(
-          (p) =>
-            dayKey(p.deadline) &&
-            !p.is_archived &&
-            p.status !== "completed" &&
-            p.status !== "archived"
         )
       );
       setChecklistItems(
@@ -117,7 +105,6 @@ export default function CalendarPage() {
 
   const dayEvents = events.filter((e) => dayKey(e.start_at) === selectedKey);
   const dayTasks = tasks.filter((t) => dayKey(t.due_date) === selectedKey);
-  const dayProjects = projects.filter((p) => dayKey(p.deadline) === selectedKey);
   const dayChecklistItems = checklistItems.filter(
     (item) => dayKey(item.due_date) === selectedKey
   );
@@ -127,7 +114,6 @@ export default function CalendarPage() {
     return {
       hasEvent: events.some((e) => dayKey(e.start_at) === key),
       hasTask: tasks.some((t) => dayKey(t.due_date) === key),
-      hasProject: projects.some((p) => dayKey(p.deadline) === key),
       hasChecklist: checklistItems.some((item) => dayKey(item.due_date) === key),
     };
   }
@@ -135,7 +121,6 @@ export default function CalendarPage() {
   const dayEmpty =
     dayEvents.length === 0 &&
     dayTasks.length === 0 &&
-    dayProjects.length === 0 &&
     dayChecklistItems.length === 0;
 
   return (
@@ -143,8 +128,7 @@ export default function CalendarPage() {
       <header className="animate-fade-up">
         <h1 className="page-title">Calendar</h1>
         <p className="mt-1 text-sm text-muted-foreground">
-          Browse dates, then review events, tasks, projects, and checklists for
-          the day.
+          Browse dates, then review events, tasks, and checklists for the day.
         </p>
       </header>
 
@@ -209,8 +193,7 @@ export default function CalendarPage() {
 
             <div className="grid w-full min-w-0 grid-cols-7 gap-0.5 sm:gap-1">
               {days.map((day) => {
-                const { hasEvent, hasTask, hasProject, hasChecklist } =
-                  markersFor(day);
+                const { hasEvent, hasTask, hasChecklist } = markersFor(day);
                 const inMonth = isSameMonth(day, cursor);
                 const isSelected = isSameDay(day, selected);
                 const isToday = isSameDay(day, new Date());
@@ -247,16 +230,6 @@ export default function CalendarPage() {
                             isSelected
                               ? "bg-primary-foreground/55"
                               : "bg-muted-foreground"
-                          )}
-                        />
-                      )}
-                      {hasProject && (
-                        <span
-                          className={cn(
-                            "h-1 w-1 rounded-full",
-                            isSelected
-                              ? "bg-primary-foreground/40"
-                              : "bg-amber-500"
                           )}
                         />
                       )}
@@ -355,25 +328,6 @@ export default function CalendarPage() {
                           <p className="mt-0.5 text-xs text-muted-foreground">
                             Due {dayKey(t.due_date)}
                             {t.due_time ? ` at ${t.due_time}` : ""}
-                          </p>
-                        </li>
-                      ))}
-                    </DaySection>
-                  )}
-
-                  {dayProjects.length > 0 && (
-                    <DaySection title="Project deadlines">
-                      {dayProjects.map((p) => (
-                        <li
-                          key={p.id}
-                          className="lp-glass-soft list-row-enter rounded-xl border px-3 py-2.5"
-                        >
-                          <div className="flex items-start justify-between gap-2">
-                            <p className="text-sm font-medium">{p.name}</p>
-                            <Badge variant="secondary">{p.priority}</Badge>
-                          </div>
-                          <p className="mt-0.5 text-xs text-muted-foreground">
-                            Deadline {dayKey(p.deadline)}
                           </p>
                         </li>
                       ))}

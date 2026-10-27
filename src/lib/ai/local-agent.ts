@@ -446,11 +446,6 @@ function describeSchedule(result: ScheduleQueryResult, workload: boolean): strin
   } else if (result.period.kind === "today" || result.period.kind === "tomorrow") {
     lines.push("No events in that period.");
   }
-  if (result.projects.length && result.period.kind !== "today") {
-    lines.push(
-      `Project deadlines in this period: ${result.projects.map((project) => `${project.name} (${formatDateOnly(project.deadline)})`).join(", ")}.`
-    );
-  }
   if (result.completed_omitted) {
     const doneWord = result.completed_omitted === 1 ? "task" : "tasks";
     lines.push(
@@ -508,6 +503,15 @@ export async function runLocalCommand(
   const rewritten = rewriteIntent(raw);
   const workingRaw = rewritten !== raw.trim() ? rewritten : raw;
   const norm = normalizeCommand(workingRaw);
+
+  if (/\bprojects?\b/.test(norm)) {
+    return {
+      message:
+        "Projects aren't available in LifePilot. Use a task or checklist instead.",
+      blocks: [],
+      context,
+    };
+  }
 
   const correction = norm.match(
     /^(?:no|nope|wait|actually|sorry)[, ]+(?:i meant|make it|change it to|it should be|that should be)\s+(.+)$/
@@ -593,7 +597,7 @@ export async function runLocalCommand(
       kind: "task" as const,
     }));
     return {
-      message: `Next calendar month (${schedule.period.label}) has ${schedule.tasks.length} incomplete task(s) and ${schedule.projects.length} project deadline(s). This plan is only a suggestion and has not been saved.`,
+      message: `Next calendar month (${schedule.period.label}) has ${schedule.tasks.length} incomplete task(s). This plan is only a suggestion and has not been saved.`,
       blocks: [
         {
           type: "schedule",
@@ -648,30 +652,10 @@ export async function runLocalCommand(
 
   const moveAll = norm.match(/move all (?:my )?(.+?) tasks? into (?:that|this|the)?\s*project/);
   if (moveAll) {
-    const projectRef = context.lastProject
-      ? { project: board.projects.find((project) => project.id === context.lastProject?.id) }
-      : null;
-    const project = projectRef?.project;
-    if (!project) {
-      return { message: "Which project should I move them into?", blocks: [], context };
-    }
-    const phrase = moveAll[1];
-    const openTasks = board.tasks.filter((task) => task.status !== "done" && task.status !== "cancelled");
-    const matches = tasksAbout(phrase, openTasks);
-    if (!matches.length) {
-      return { message: `I couldn't find tasks matching “${cleanPhrase(phrase)}”. Nothing was moved.`, blocks: [], context };
-    }
-    const result = await act("move_tasks_to_project", {
-      project_id: project.id,
-      task_ids: matches.map((task) => task.id),
-    });
-    if (!result.success) return { message: failed("move those tasks", result.error), blocks: [], context };
-    const payload = result.result as { updated: Task[]; project: Project };
-    payload.updated.forEach((task) => rememberTask(context, task));
-    rememberProject(context, payload.project);
     return {
-      message: `Moved ${payload.updated.length} task(s) into “${payload.project.name}”: ${payload.updated.map((task) => task.title).join(", ")}.`,
-      blocks: [{ type: "tasks", title: payload.project.name, tasks: payload.updated.map((task) => toTaskCard(task, [payload.project], board.timezone)) }],
+      message:
+        "Projects aren't available in LifePilot. Use a task or checklist instead.",
+      blocks: [],
       context,
     };
   }
@@ -680,36 +664,10 @@ export async function runLocalCommand(
     /^(?:move|put|assign) (.+?) into (?:the |my )?(.+?)(?: project)?$/
   );
   if (moveOneInto && !/\ball\b/.test(norm)) {
-    const taskResolved = resolveTaskPhrase(moveOneInto[1], board, context);
-    if ("ask" in taskResolved) return { message: taskResolved.ask, blocks: [], context };
-    if ("none" in taskResolved) return { message: taskResolved.none, blocks: [], context };
-    const projectResolved = resolveProjectPhrase(
-      moveOneInto[2].replace(/\s+project$/, ""),
-      board,
-      context
-    );
-    if ("ask" in projectResolved) return { message: projectResolved.ask, blocks: [], context };
-    if ("none" in projectResolved) return { message: projectResolved.none, blocks: [], context };
-    const target = taskResolved.tasks[0];
-    const project = projectResolved.project;
-    const result = await act("move_tasks_to_project", {
-      project_id: project.id,
-      task_ids: [target.id],
-    });
-    if (!result.success) return { message: failed("move that task", result.error), blocks: [], context };
-    const payload = result.result as { updated: Task[]; project: Project };
-    const moved = payload.updated[0] ?? target;
-    rememberTask(context, moved);
-    rememberProject(context, payload.project);
     return {
-      message: `Moved “${moved.title}” into “${payload.project.name}”.`,
-      blocks: [
-        {
-          type: "tasks",
-          title: payload.project.name,
-          tasks: [toTaskCard(moved, [payload.project], board.timezone)],
-        },
-      ],
+      message:
+        "Projects aren't available in LifePilot. Use a task or checklist instead.",
+      blocks: [],
       context,
     };
   }
@@ -824,10 +782,6 @@ export async function runLocalCommand(
 
   if (/checklist/.test(norm) && /^(?:add|create|make|start)\b/.test(norm)) {
     return createChecklistCommand(workingRaw, norm, context, board, act);
-  }
-
-  if (/\bproject\b/.test(norm) && /^(?:add|create|make|start)\b/.test(norm)) {
-    return createProjectCommand(workingRaw, norm, context, board, act);
   }
 
   if (

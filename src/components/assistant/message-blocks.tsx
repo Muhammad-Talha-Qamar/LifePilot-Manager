@@ -5,7 +5,7 @@ import { toast } from "sonner";
 import { api } from "@/lib/client-api";
 import { notifyDataChanged } from "@/lib/data-events";
 import { formatDateOnly } from "@/lib/utils/dates";
-import type { AssistantBlock, ChecklistCardData, ProjectCardData, TaskCardData } from "@/lib/ai/types";
+import type { AssistantBlock, ChecklistCardData, TaskCardData } from "@/lib/ai/types";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -55,14 +55,7 @@ function Block({ block }: { block: AssistantBlock }) {
     );
   }
   if (block.type === "projects") {
-    return (
-      <div className="w-full min-w-0 space-y-2.5">
-        <p className="text-xs font-medium text-muted-foreground">{block.title}</p>
-        {block.projects.map((project) => (
-          <ProjectCard key={project.id} project={project} />
-        ))}
-      </div>
-    );
+    return null;
   }
   if (block.type === "events") {
     return (
@@ -213,7 +206,6 @@ function TaskCard({ task }: { task: TaskCardData }) {
           <p className="mt-0.5 break-words text-xs text-muted-foreground">
             {task.due_date ? formatDateOnly(task.due_date) : "No deadline"}
             {task.due_time ? ` · ${task.due_time.slice(0, 5)}` : ""}
-            {task.project_name ? ` · ${task.project_name}` : ""}
           </p>
         </button>
         <div className="flex max-w-[40%] shrink-0 flex-col items-end gap-1">
@@ -313,7 +305,6 @@ function ChecklistCard({ checklist }: { checklist: ChecklistCardData }) {
           <p className="break-words text-sm font-medium [overflow-wrap:anywhere]">{checklist.title}</p>
           <p className="mt-0.5 break-words text-xs text-muted-foreground [overflow-wrap:anywhere]">
             {done}/{checklist.items.length} complete
-            {checklist.project_name ? ` · ${checklist.project_name}` : ""}
           </p>
         </div>
         <span className="shrink-0 pt-0.5 text-sm font-medium text-primary tabular-nums">
@@ -354,105 +345,6 @@ function ChecklistCard({ checklist }: { checklist: ChecklistCardData }) {
         )}
       </ul>
     </article>
-  );
-}
-
-function ProjectCard({ project }: { project: ProjectCardData }) {
-  const { refreshRecords } = useAssistant();
-  const [open, setOpen] = useState(false);
-  const [name, setName] = useState(project.name);
-  const [deadline, setDeadline] = useState(project.deadline ?? "");
-  const [saving, setSaving] = useState(false);
-
-  async function save() {
-    setSaving(true);
-    try {
-      await api(`/api/projects/${project.id}`, {
-        method: "PATCH",
-        body: JSON.stringify({ name: name.trim(), deadline: deadline || null }),
-      });
-      notifyDataChanged();
-      await refreshRecords();
-      setOpen(false);
-      toast.success(`Updated “${name.trim()}”`);
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Could not update the project");
-    } finally {
-      setSaving(false);
-    }
-  }
-
-  return (
-    <>
-      <button
-        type="button"
-        onClick={() => setOpen(true)}
-        className="ai-block-card animate-fade-up box-border w-full min-w-0 max-w-full overflow-hidden rounded-xl border border-border/70 bg-surface-soft p-3 text-left sm:p-3.5"
-      >
-        <div className="flex min-w-0 items-start justify-between gap-2 sm:gap-3">
-          <div className="min-w-0 flex-1">
-            <p className="break-words text-sm font-medium [overflow-wrap:anywhere]">{project.name}</p>
-            <p className="mt-0.5 break-words text-xs text-muted-foreground [overflow-wrap:anywhere]">
-              {project.deadline ? `Deadline ${formatDateOnly(project.deadline)}` : "No deadline"} ·{" "}
-              {project.status}
-            </p>
-          </div>
-          <Badge variant={priorityVariant(project.priority)} className="shrink-0">
-            {project.progress_percent}%
-          </Badge>
-        </div>
-        <div className="mt-2.5 h-1.5 overflow-hidden rounded-full bg-muted">
-          <div
-            className="h-full rounded-full bg-primary transition-all duration-300"
-            style={{ width: `${project.progress_percent}%` }}
-          />
-        </div>
-        {project.tasks.length > 0 && (
-          <ul className="mt-2.5 space-y-1 text-xs text-muted-foreground">
-            {project.tasks.slice(0, 4).map((task) => (
-              <li key={task.id} className="min-w-0 break-words [overflow-wrap:anywhere]">
-                {task.title}
-                {task.due_date ? ` · ${formatDateOnly(task.due_date)}` : ""}
-              </li>
-            ))}
-          </ul>
-        )}
-      </button>
-      <Dialog open={open} onOpenChange={setOpen}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Project details</DialogTitle>
-          </DialogHeader>
-          <div className="space-y-3">
-            <div className="space-y-1.5">
-              <Label htmlFor={`project-${project.id}`}>Name</Label>
-              <Input
-                id={`project-${project.id}`}
-                value={name}
-                onChange={(event) => setName(event.target.value)}
-              />
-            </div>
-            <div className="space-y-1.5">
-              <Label htmlFor={`project-due-${project.id}`}>Deadline</Label>
-              <Input
-                id={`project-due-${project.id}`}
-                type="date"
-                value={deadline}
-                onChange={(event) => setDeadline(event.target.value)}
-              />
-            </div>
-          </div>
-          <DialogFooter>
-            <Button type="button" variant="outline" onClick={() => setOpen(false)}>
-              Close
-            </Button>
-            <Button type="button" onClick={() => void save()} disabled={saving || !name.trim()}>
-              {saving ? "Saving…" : "Save"}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-    </>
   );
 }
 
