@@ -32,7 +32,7 @@ function stripPolite(text: string): string {
 function rewriteCreates(text: string): string {
   // "remind me to buy milk tomorrow" / "don't forget to …"
   const remind = text.match(
-    /^(?:remind me(?: to)?|don'?t forget(?: to)?|remember(?: to)?|note(?: to)?|ping me(?: to)?|nudge me(?: to)?|hit me(?: up)?(?: to)?|send me a reminder(?: to)?|set a reminder(?: to)?|make a note(?: to)?)\s+(.+)$/i
+    /^(?:remind me(?: to)?|don'?t forget(?: to)?|do not forget(?: to)?|remember(?: to)?|note(?: to)?|ping me(?: to)?|nudge me(?: to)?|hit me(?: up)?(?: to)?|send me a reminder(?: to)?|set a reminder(?: to)?|make a note(?: to)?)\s+(.+)$/i
   );
   if (remind) return `add ${remind[1]}`;
 
@@ -97,7 +97,7 @@ function rewriteCreates(text: string): string {
 
 function rewriteCompletes(text: string): string {
   const done = text.match(
-    /^(?:i(?:'ve| have)?\s+)?(?:done(?: with)?|finished|completed|wrapped up|knocked out|sorted(?: out)?|crushed|nailed|shipped)\s+(.+?)(?:\s+(?:already|now))?$/i
+    /^(?:i(?:'ve| have)?\s+)?(?:just\s+)?(?:done(?: with)?|finished|completed|wrapped up|knocked out|sorted(?: out)?|crushed|nailed|shipped)\s+(.+?)(?:\s+(?:already|now))?$/i
   );
   if (done && !/^(?:add|create|make|delete|move|show|what|plan)\b/i.test(done[1])) {
     return `mark ${done[1]} complete`;
@@ -206,7 +206,10 @@ function rewriteQueries(text: string): string {
   }
 
   if (/^(?:my )?checklists?\??$/i.test(text)) return "show my checklists";
-  if (/^(?:show|list|see|view|display)\s+(?:my\s+)?checklists?\b/i.test(text)) {
+  if (
+    /^(?:show|list|see|view|display)\s+(?:me\s+|my\s+)?checklists?\b/i.test(text) ||
+    /^(?:show|list|see|view|display)\s+me\s+(?:my\s+)?checklists?\b/i.test(text)
+  ) {
     return "show my checklists";
   }
 

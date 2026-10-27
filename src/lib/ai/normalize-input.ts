@@ -7,6 +7,8 @@
  * downstream patterns see a smaller, cleaner language.
  */
 
+import { correctSpellingAndGrammar } from "./spell";
+
 const TYPO_MAP: Array<[RegExp, string]> = [
   [/\b(tommorow|tommorrow|tomorow|tomorro|tmrw|tmr|tomorow'?s|tomorrow'?s)\b/gi, "tomorrow"],
   [/\b(todsy|tdy|tday|2day)\b/gi, "today"],
@@ -19,7 +21,8 @@ const TYPO_MAP: Array<[RegExp, string]> = [
   [/\b(meetng|mtg|meating)\b/gi, "meeting"],
   [/\b(delet|dleete|rmove|remov|remve)\b/gi, "delete"],
   [/\b(schdule|sheduling|schedual|shedule)\b/gi, "schedule"],
-  [/\b(remindr|remider|remnd)\b/gi, "reminder"],
+  [/\b(remindr|remider)\b/gi, "reminder"],
+  [/\b(remnd|remid|remine)\b/gi, "remind"],
   [/\b(priorty|prioroty|prioirty)\b/gi, "priority"],
   [/\b(urgnt|emrgency)\b/gi, "urgent"],
   [/\b(calender|calandar)\b/gi, "calendar"],
@@ -199,6 +202,9 @@ export function normalizeInput(raw: string): string {
   for (const [pattern, replacement] of SPANISH_MAP) {
     text = text.replace(pattern, replacement);
   }
+
+  // Fuzzy domain spelling + light grammar (Damerau–Levenshtein / keyboard-aware)
+  text = correctSpellingAndGrammar(text);
 
   // Collapse doubled polite words after slang expansion
   text = text

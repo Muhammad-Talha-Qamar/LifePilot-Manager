@@ -62,11 +62,13 @@ export function scoreName(query: string, name: string): number {
   const nTokens = n.split(" ");
   let hits = 0;
   for (const token of qTokens) {
+    const maxDist = token.length >= 8 ? 2 : token.length > 3 ? 1 : 0;
     const close = nTokens.some(
       (candidate) =>
         candidate === token ||
         (token.length > 4 && candidate.startsWith(token.slice(0, 4))) ||
-        (token.length > 3 && levenshtein(candidate, token) <= 1)
+        (candidate.length > 4 && token.startsWith(candidate.slice(0, 4))) ||
+        (maxDist > 0 && levenshtein(candidate, token) <= maxDist)
     );
     if (close) hits += 1;
   }
