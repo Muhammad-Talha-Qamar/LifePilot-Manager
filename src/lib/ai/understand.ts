@@ -4,10 +4,11 @@
  * a friendly reply, or a pass-through for the existing local agent.
  *
  * This is the offline/local path used when no cloud model is configured.
- * With OPENAI_API_KEY, the model agent handles open-ended understanding instead.
+ * With OPENAI_API_KEY, the model agent still receives a local paraphrase hint.
  */
 
 import { rewriteIntent } from "./intent";
+import { normalizeInput } from "./normalize-input";
 
 export type Understood =
   | { kind: "command"; text: string }
@@ -15,48 +16,55 @@ export type Understood =
   | { kind: "pass" };
 
 const GREETING =
-  /^(?:hey|hi|hello|yo|hiya|howdy|good\s+(?:morning|afternoon|evening)|sup|what's up|whats up)(?:\s*[!?.]*)?$/i;
+  /^(?:hey|hi|hello|yo|hiya|howdy|hola|salam|salaam|assalamu? ?alaikum|good\s+(?:morning|afternoon|evening)|sup|what(?:'s| is|s) up|heya)(?:\s*[!?.]*)?$/i;
 
 const THANKS =
-  /^(?:thanks|thank you|thx|ty|appreciate it|cheers)(?:\s*[!?.]*)?$/i;
+  /^(?:thanks|thank you|thx|ty|appreciate it|cheers|shukriya|shukria|merci|gracias)(?:\s*[!?.]*)?$/i;
 
 const HOW_ARE_YOU =
-  /^(?:how are you(?: doing)?|how's it going|how r u|you good)(?:\s*[!?.]*)?$/i;
+  /^(?:how are you(?: doing)?|how(?:'s| is|s) it going|how r u|you good|kya haal hai)(?:\s*[!?.]*)?$/i;
 
 const HELP =
-  /^(?:help(?: me)?|what can you do|what do you do|how (?:do|can) (?:i|you) (?:use|work)|capabilities|commands?)(?:\s*[!?.]*)?$/i;
+  /^(?:help(?: me)?|what can you do|what do you do|how (?:do|can) (?:i|you) (?:use|work)|capabilities|commands?|examples?)(?:\s*[!?.]*)?$/i;
 
 const WHO =
-  /^(?:who are you|what are you|your name)(?:\s*[!?.]*)?$/i;
-
-function stripNoise(text: string): string {
-  return text
-    .replace(/[\u2018\u2019]/g, "'")
-    .replace(/[\u201C\u201D]/g, '"')
-    .replace(/\s+/g, " ")
-    .trim();
-}
+  /^(?:who are you|what are you|your name|introduce yourself)(?:\s*[!?.]*)?$/i;
 
 function softCreate(text: string): string | null {
-  // Imperative without "add/create": "buy milk tomorrow", already handled in rewriteBareTask.
   // Soft obligation / planning talk that still means "save a task".
   const soft = text.match(
-    /^(?:i(?:'m| am)\s+)?(?:gonna|going to|planning to|trying to|hoping to|meant to)\s+(.+)$/i
+    /^(?:i(?:'m| am)\s+)?(?:gonna|going to|planning to|trying to|hoping to|meant to|about to|supposed to)\s+(.+)$/i
   );
   if (soft) return `add ${soft[1]}`;
 
-  const gotta = text.match(/^(?:gotta|lemme|let me)\s+(.+)$/i);
+  const gotta = text.match(/^(?:gotta|lemme|let me|let us)\s+(.+)$/i);
   if (gotta) return `add ${gotta[1]}`;
 
   // "can you remind me …" / "could you jot down …"
   const jot = text.match(
-    /^(?:can you|could you|would you|will you)?\s*(?:please\s+)?(?:jot(?:\s+down)?|note(?:\s+down)?|write(?:\s+down)?|save|log)\s+(.+)$/i
+    /^(?:can you|could you|would you|will you)?\s*(?:please\s+)?(?:jot(?:\s+down)?|note(?:\s+down)?|write(?:\s+down)?|save|log|capture|park)\s+(.+)$/i
   );
   if (jot) return `add ${jot[1]}`;
 
   // "keep track of …" / "track …"
-  const track = text.match(/^(?:keep track of|track)\s+(.+)$/i);
+  const track = text.match(/^(?:keep track of|track|remember that)\s+(.+)$/i);
   if (track) return `add ${track[1]}`;
+
+  // "I should probably …"
+  const probably = text.match(
+    /^(?:i\s+)?(?:should|need to|have to|gotta)\s+probably\s+(.+)$/i
+  );
+  if (probably) return `add ${probably[1]}`;
+
+  // "make sure I …"
+  const makeSure = text.match(/^(?:make sure(?: that)? i|ensure i)\s+(.+)$/i);
+  if (makeSure) return `add ${makeSure[1]}`;
+
+  // "don't let me forget …"
+  const dontForget = text.match(
+    /^(?:don'?t let me forget(?: to)?|never let me forget(?: to)?)\s+(.+)$/i
+  );
+  if (dontForget) return `add ${dontForget[1]}`;
 
   return null;
 }
@@ -64,19 +72,29 @@ function softCreate(text: string): string | null {
 function softComplete(text: string): string | null {
   // "the essay is done" / "maths homework is finished"
   const isDone = text.match(
-    /^(.+?)\s+(?:is|are)\s+(?:done|finished|complete|completed|over)(?:\s+now)?$/i
+    /^(.+?)\s+(?:is|are)\s+(?:done|finished|complete|completed|over|sorted)(?:\s+now)?$/i
   );
-  if (isDone && !/^(?:add|create|what|show|list|plan)\b/i.test(isDone[1])) {
+  if (isDone && !/^(?:add|create|what|show|list|plan|how|who|where)\b/i.test(isDone[1])) {
     return `mark ${isDone[1]} complete`;
   }
 
   // "just finished X" / "just completed X"
-  const just = text.match(/^just\s+(?:finished|completed|done(?:\s+with)?)\s+(.+)$/i);
+  const just = text.match(
+    /^just\s+(?:finished|completed|done(?:\s+with)?|wrapped(?:\s+up)?)\s+(.+)$/i
+  );
   if (just) return `mark ${just[1]} complete`;
 
   // "X — done" / "X ✓"
-  const trailing = text.match(/^(.+?)\s*(?:—|-|–)\s*(?:done|finished|complete)$/i);
+  const trailing = text.match(/^(.+?)\s*(?:—|-|–|:)\s*(?:done|finished|complete)$/i);
   if (trailing) return `mark ${trailing[1]} complete`;
+
+  // "finally done with X"
+  const finallyDone = text.match(/^finally\s+(?:done with|finished)\s+(.+)$/i);
+  if (finallyDone) return `mark ${finallyDone[1]} complete`;
+
+  // "crossed X off"
+  const crossed = text.match(/^crossed\s+(.+?)\s+off$/i);
+  if (crossed) return `mark ${crossed[1]} complete`;
 
   return null;
 }
@@ -88,24 +106,38 @@ function softQuery(text: string): string | null {
       text
     ) ||
     /what do i still (?:need|have) to (?:do|finish)/i.test(text) ||
-    /catch me up|bring me up to speed|status(?:\s+update)?|overview/i.test(text)
+    /catch me up|bring me up to speed|status(?:\s+update)?|overview|sitrep/i.test(text) ||
+    /what(?:'s| is|s)? on my (?:plate|agenda|schedule)/i.test(text) ||
+    /fill me in|update me|where do i stand/i.test(text)
   ) {
     if (/\btomorrow\b/i.test(text)) return "show my tasks for tomorrow";
     if (/\bthis week\b/i.test(text)) return "show my tasks for this week";
     if (/\bnext week\b/i.test(text)) return "show my tasks for next week";
+    if (/\boverdue\b/i.test(text)) return "show my overdue tasks";
     return "show my tasks for today";
   }
 
   // "am i free tomorrow" / "do i have room today"
-  if (/\b(?:am i free|do i have (?:room|time|space)|is (?:my day|today) clear)\b/i.test(text)) {
+  if (
+    /\b(?:am i free|do i have (?:room|time|space)|is (?:my day|today) clear|anything blocking)\b/i.test(
+      text
+    )
+  ) {
     if (/\btomorrow\b/i.test(text)) return "show my tasks for tomorrow";
+    if (/\bthis week\b/i.test(text)) return "show my tasks for this week";
     return "show my tasks for today";
   }
 
   // "give me a rundown of the week"
-  if (/\b(?:rundown|recap|summary|brief(?:ing)?)\b/i.test(text)) {
+  if (/\b(?:rundown|recap|summary|brief(?:ing)?|digest)\b/i.test(text)) {
     if (/\bweek\b/i.test(text)) return "how much work this week";
+    if (/\bmonth\b/i.test(text)) return "show my tasks for this month";
     return "show my tasks for today";
+  }
+
+  // "any overdue stuff"
+  if (/\b(?:any |show )?(?:overdue|late|past due)\b/i.test(text)) {
+    return "show my overdue tasks";
   }
 
   return null;
@@ -114,42 +146,92 @@ function softQuery(text: string): string | null {
 function softChecklist(text: string): string | null {
   // "shopping list: milk, eggs, bread"
   const labeled = text.match(
-    /^(?:(?:make|create|start|new)\s+)?(?:a\s+)?(?:shopping|grocery|groceries|packing|todo)?\s*list\s*[:\-]\s*(.+)$/i
+    /^(?:(?:make|create|start|new|build)\s+)?(?:a\s+)?(?:shopping|grocery|groceries|packing|todo|errands?)?\s*list\s*[:\-]\s*(.+)$/i
   );
   if (labeled) {
-    const kind = text.match(/\b(shopping|grocery|groceries|packing)\b/i)?.[1] ?? "checklist";
+    const kind = text.match(/\b(shopping|grocery|groceries|packing|errands?)\b/i)?.[1] ?? "checklist";
     const title =
       /grocery|groceries|shopping/i.test(kind)
         ? "Groceries"
         : /packing/i.test(kind)
           ? "Packing"
-          : "Checklist";
+          : /errand/i.test(kind)
+            ? "Errands"
+            : "Checklist";
     return `create checklist for ${title} with ${labeled[1]}`;
   }
 
   // "make a list of X, Y, and Z" / "checklist: …"
   const makeList = text.match(
-    /^(?:make|create|start)\s+(?:a\s+)?(?:new\s+)?(?:checklist|list)\s+(?:of|with|:)\s+(.+)$/i
+    /^(?:make|create|start|build)\s+(?:a\s+)?(?:new\s+)?(?:checklist|list)\s+(?:of|with|:)\s+(.+)$/i
   );
   if (makeList) return `create checklist for Checklist with ${makeList[1]}`;
 
   const bareList = text.match(/^checklist\s*[:\-]\s*(.+)$/i);
   if (bareList) return `create checklist for Checklist with ${bareList[1]}`;
 
+  // "groceries: milk eggs"
+  const groceries = text.match(/^(?:groceries|shopping|packing)\s*[:\-]\s*(.+)$/i);
+  if (groceries) {
+    const title = /packing/i.test(text) ? "Packing" : "Groceries";
+    return `create checklist for ${title} with ${groceries[1]}`;
+  }
+
+  // "add milk and eggs to my groceries"
+  const addToNamed = text.match(
+    /^(?:add|put)\s+(.+?)\s+to\s+(?:my\s+|the\s+)?(groceries|shopping|packing|checklist)(?:\s+list)?$/i
+  );
+  if (addToNamed) {
+    const listName =
+      /grocery|shopping/i.test(addToNamed[2])
+        ? "groceries"
+        : /packing/i.test(addToNamed[2])
+          ? "packing"
+          : "checklist";
+    return `add ${addToNamed[1]} to my ${listName} checklist`;
+  }
+
   return null;
 }
 
 function softPlan(text: string): string | null {
   if (
-    /^(?:help me )?(?:plan|organize|structure|schedule)\s+(?:my\s+)?(?:day|today|morning|afternoon)/i.test(
+    /^(?:help me )?(?:plan|organize|structure|schedule|map out)\s+(?:my\s+)?(?:day|today|morning|afternoon|evening)/i.test(
       text
     ) ||
     /what should i (?:do|focus on|work on|prioriti[sz]e)(?:\s+today)?/i.test(text) ||
-    /what(?:'s| is) the best (?:use of|way to spend) (?:my )?time/i.test(text)
+    /what(?:'s| is) the best (?:use of|way to spend) (?:my )?time/i.test(text) ||
+    /help me (?:get|stay) organized/i.test(text) ||
+    /build me a (?:day|daily) plan/i.test(text)
   ) {
     return "plan my day";
   }
   if (/plan\s+(?:out\s+)?(?:my\s+)?next month/i.test(text)) return "plan my next month";
+  return null;
+}
+
+function softReschedule(text: string): string | null {
+  const push = text.match(
+    /^(?:can we |could we |please )?(?:push|bump|slide)\s+(.+?)\s+(?:to|until|till)\s+(.+)$/i
+  );
+  if (push) return `move ${push[1]} to ${push[2]}`;
+
+  const changeDate = text.match(
+    /^(?:change|update|set)\s+(?:the\s+)?(?:date|deadline|due date)\s+(?:of\s+|for\s+)?(.+?)\s+to\s+(.+)$/i
+  );
+  if (changeDate) return `move ${changeDate[1]} to ${changeDate[2]}`;
+
+  return null;
+}
+
+function softEvent(text: string): string | null {
+  const meeting = text.match(
+    /^(?:i have |there's |there is )?(?:a\s+)?(meeting|appointment|exam)\s+(?:with\s+)?(.+?)(?:\s+(?:on|for|at)\s+(.+))?$/i
+  );
+  if (meeting && !/^(?:add|create|schedule|make)\b/i.test(text)) {
+    const when = meeting[3] ? ` on ${meeting[3]}` : "";
+    return `schedule ${meeting[1]} ${meeting[2]}${when}`;
+  }
   return null;
 }
 
@@ -174,7 +256,9 @@ function conversationalReply(text: string): string | null {
       "• “What's left today?”",
       "• “Make a groceries list with milk and eggs”",
       "• “Plan my day”",
-      "Typos and incomplete sentences are fine — I'll figure out what you mean when I can.",
+      "• “Move maths homework to Friday”",
+      "• “Shopping list: milk, eggs, bread”",
+      "Typos, slang, mixed languages, and incomplete sentences are fine — I'll figure out what you mean when I can.",
     ].join("\n");
   }
   return null;
@@ -184,7 +268,7 @@ function conversationalReply(text: string): string | null {
  * Understand everyday user text before the local command matcher runs.
  */
 export function understandInput(raw: string): Understood {
-  const text = stripNoise(raw);
+  const text = normalizeInput(raw);
   if (!text) return { kind: "pass" };
 
   const chat = conversationalReply(text);
@@ -196,6 +280,8 @@ export function understandInput(raw: string): Understood {
     softChecklist(text) ||
     softQuery(text) ||
     softComplete(text) ||
+    softReschedule(text) ||
+    softEvent(text) ||
     softCreate(text);
 
   const candidate = soft ?? text;

@@ -13,6 +13,8 @@ const PROMPTS = [
   "Remind me to call mom tomorrow",
   "The essay is done",
   "Shopping list: milk, eggs, bread",
+  "Plan my day",
+  "Move maths homework to Friday",
 ];
 
 function AssistantText({

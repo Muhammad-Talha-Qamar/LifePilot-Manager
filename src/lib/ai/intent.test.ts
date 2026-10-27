@@ -11,6 +11,8 @@ describe("rewriteIntent", () => {
     expect(rewriteIntent("todo: buy milk")).toBe("add buy milk");
     expect(rewriteIntent("nudge me to stretch tonight")).toBe("add stretch tonight");
     expect(rewriteIntent("I want to draft the proposal")).toBe("add draft the proposal");
+    expect(rewriteIntent("set a reminder to drink water")).toBe("add drink water");
+    expect(rewriteIntent("ping me to pay rent")).toBe("add pay rent");
   });
 
   it("strips polite wrappers", () => {
@@ -24,17 +26,33 @@ describe("rewriteIntent", () => {
     expect(rewriteIntent("done with maths homework")).toBe("mark maths homework complete");
     expect(rewriteIntent("I finished the lab report")).toBe("mark the lab report complete");
     expect(rewriteIntent("remove the duplicate task")).toBe("delete the duplicate task");
+    expect(rewriteIntent("essay done")).toBe("mark essay complete");
   });
 
   it("rewrites short and casual schedule questions", () => {
     expect(rewriteIntent("today?")).toBe("show my tasks for today");
     expect(rewriteIntent("do I have anything tomorrow")).toBe("show my tasks for tomorrow");
     expect(rewriteIntent("what's on this week")).toBe("show my tasks for this week");
+    expect(rewriteIntent("pull up my agenda")).toBe("show my tasks for today");
   });
 
   it("treats bare title + date as a create", () => {
     expect(rewriteIntent("maths homework tomorrow")).toBe("add maths homework for tomorrow");
     expect(rewriteIntent("call dentist on Friday")).toBe("add call dentist for Friday");
+  });
+
+  it("fixes common typos while rewriting", () => {
+    expect(rewriteIntent("remind me to submit hw tommorow")).toBe(
+      "add submit homework tomorrow"
+    );
+    expect(rewriteIntent("show my cheklist")).toBe("show my checklists");
+  });
+
+  it("rewrites postpone / bump phrasing", () => {
+    expect(rewriteIntent("postpone dentist until next Monday")).toBe(
+      "move dentist to next Monday"
+    );
+    expect(rewriteIntent("bump the essay to Friday")).toBe("move the essay to Friday");
   });
 
   it("does not rewrite corrections or existing commands", () => {

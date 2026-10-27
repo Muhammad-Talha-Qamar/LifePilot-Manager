@@ -6,6 +6,7 @@ describe("understandInput", () => {
     expect(understandInput("hey")).toMatchObject({ kind: "reply" });
     expect(understandInput("what can you do?")).toMatchObject({ kind: "reply" });
     expect(understandInput("thanks!")).toMatchObject({ kind: "reply" });
+    expect(understandInput("salam")).toMatchObject({ kind: "reply" });
   });
 
   it("turns soft obligations into create commands", () => {
@@ -16,6 +17,14 @@ describe("understandInput", () => {
     expect(understandInput("jot down dentist appointment tomorrow")).toEqual({
       kind: "command",
       text: "add dentist appointment tomorrow",
+    });
+    expect(understandInput("make sure I email the tutor")).toEqual({
+      kind: "command",
+      text: "add email the tutor",
+    });
+    expect(understandInput("don't let me forget to stretch")).toEqual({
+      kind: "command",
+      text: "add stretch",
     });
   });
 
@@ -28,6 +37,10 @@ describe("understandInput", () => {
       kind: "command",
       text: "mark maths homework complete",
     });
+    expect(understandInput("finally done with the lab")).toEqual({
+      kind: "command",
+      text: "mark the lab complete",
+    });
   });
 
   it("understands rundown / what's left style queries", () => {
@@ -39,12 +52,24 @@ describe("understandInput", () => {
       kind: "command",
       text: "show my tasks for today",
     });
+    expect(understandInput("what's on my plate")).toEqual({
+      kind: "command",
+      text: "show my tasks for today",
+    });
+    expect(understandInput("any overdue stuff")).toEqual({
+      kind: "command",
+      text: "show my overdue tasks",
+    });
   });
 
   it("understands shopping-list shorthand", () => {
     expect(understandInput("shopping list: milk, eggs, bread")).toEqual({
       kind: "command",
       text: "create checklist for Groceries with milk, eggs, bread",
+    });
+    expect(understandInput("groceries: milk, bread")).toEqual({
+      kind: "command",
+      text: "create checklist for Groceries with milk, bread",
     });
   });
 
@@ -53,6 +78,26 @@ describe("understandInput", () => {
       kind: "command",
       text: "plan my day",
     });
+    expect(understandInput("build me a daily plan")).toEqual({
+      kind: "command",
+      text: "plan my day",
+    });
+  });
+
+  it("normalizes typos before understanding", () => {
+    expect(understandInput("remind me to call mom tommorow")).toEqual({
+      kind: "command",
+      text: "add call mom tomorrow",
+    });
+  });
+
+  it("understands romanized Urdu reminder phrasing", () => {
+    const result = understandInput("mujhe yaad dilao kal doctor");
+    expect(result.kind).toBe("command");
+    if (result.kind === "command") {
+      expect(result.text.toLowerCase()).toContain("add");
+      expect(result.text.toLowerCase()).toContain("doctor");
+    }
   });
 
   it("passes through already-clear commands", () => {

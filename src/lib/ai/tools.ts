@@ -39,7 +39,8 @@ export const TOOL_DEFINITIONS = [
     type: "function" as const,
     function: {
       name: "list_tasks",
-      description: "List the user's tasks with optional filters.",
+      description:
+        "List the user's tasks with optional filters. Prefer query_schedule for period questions (today/tomorrow/this week). Use list_tasks for filtered searches by status, priority, category, or free-text query.",
       parameters: {
         type: "object",
         properties: {
@@ -76,7 +77,7 @@ export const TOOL_DEFINITIONS = [
     function: {
       name: "create_task",
       description:
-        "Create a task. Resolve relative dates like tomorrow using the user's timezone before calling.",
+        "Create a task whenever the user wants something remembered: remind me, don't forget, I need to, I gotta, put on my list, todo:, bare title+date, jot down, etc. Resolve relative dates (tomorrow, Friday) to YYYY-MM-DD in the user's timezone before calling. Do not create duplicates of an identical open task.",
       parameters: {
         type: "object",
         properties: {
@@ -99,7 +100,8 @@ export const TOOL_DEFINITIONS = [
     type: "function" as const,
     function: {
       name: "update_task",
-      description: "Update an existing task by id.",
+      description:
+        "Update an existing task by id (title, due date, priority, status, tags). Use for reschedule, make urgent, rename, and corrections like 'no I meant Friday'. Never create a duplicate when updating.",
       parameters: {
         type: "object",
         properties: {
@@ -123,7 +125,8 @@ export const TOOL_DEFINITIONS = [
     type: "function" as const,
     function: {
       name: "complete_task",
-      description: "Mark a task as done.",
+      description:
+        "Mark a task as done. Use for: done with X, X is finished, just wrapped X, check off X (when X is a task). Prefer complete_checklist_items when X matches a checklist item better.",
       parameters: {
         type: "object",
         properties: { id: { type: "string" } },
@@ -164,7 +167,8 @@ export const TOOL_DEFINITIONS = [
     type: "function" as const,
     function: {
       name: "create_checklist",
-      description: "Create a checklist with optional initial items.",
+      description:
+        "Create a checklist with optional initial items. Use for shopping/grocery/packing lists, 'list: a, b, c', and 'make a checklist for … with …'. Prefer a checklist over many tiny unrelated tasks when the user clearly wants a list.",
       parameters: {
         type: "object",
         properties: {
@@ -378,7 +382,7 @@ export const TOOL_DEFINITIONS = [
     function: {
       name: "search_records",
       description:
-        "Find existing tasks or checklists by a fuzzy name before updating them. Use this to resolve references like 'that science task' instead of inventing ids.",
+        "Find existing tasks, checklists, or events by a fuzzy name before updating/completing/deleting them. Always search first when the user refers to something by title ('the essay', 'maths homework', 'groceries') instead of inventing ids.",
       parameters: {
         type: "object",
         properties: {
@@ -393,7 +397,8 @@ export const TOOL_DEFINITIONS = [
     type: "function" as const,
     function: {
       name: "add_checklist_items",
-      description: "Add one or more items to an existing checklist.",
+      description:
+        "Add one or more items to an existing checklist (e.g. 'add milk and eggs to groceries'). Resolve the checklist via search_records or conversation focus first.",
       parameters: {
         type: "object",
         properties: {
