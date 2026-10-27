@@ -9,10 +9,10 @@ import { MessageBlocks } from "./message-blocks";
 import { useAssistant } from "./assistant-provider";
 
 const PROMPTS = [
-  "What should I finish today?",
+  "What's left today?",
   "Remind me to call mom tomorrow",
-  "Plan my day",
-  "Create a checklist for groceries with milk and eggs",
+  "The essay is done",
+  "Shopping list: milk, eggs, bread",
 ];
 
 function AssistantText({
@@ -102,8 +102,8 @@ export function AssistantWorkspace() {
           role="status"
           className="ai-banner animate-fade shrink-0 px-3 py-2 text-center text-[12px] leading-snug text-muted-foreground sm:px-4 sm:py-2.5 sm:text-sm md:px-8"
         >
-          Full conversational AI is not connected yet. Clear requests still work for tasks,
-          checklists, and dates.
+          Full cloud AI is not connected yet. You can still talk naturally for tasks,
+          checklists, and dates — add an OpenAI key for ChatGPT-level understanding.
         </div>
       )}
 
@@ -126,8 +126,9 @@ export function AssistantWorkspace() {
                 Hello, what would you like to get organized today?
               </h1>
               <p className="mx-auto mt-2 max-w-md text-pretty text-[13px] leading-relaxed text-muted-foreground sm:mt-3 sm:text-[15px]">
-                Tell me what you need to do. I&apos;ll help you organize your tasks,
-                checklists, and important dates.
+                Talk naturally — like a friend. Typos, slang, and incomplete
+                sentences are fine. I&apos;ll figure out the intent and update your
+                tasks, checklists, and dates.
               </p>
               <div className="mt-4 flex flex-wrap justify-center gap-1.5 sm:mt-6 sm:gap-2">
                 {PROMPTS.map((prompt, index) => (
@@ -233,7 +234,7 @@ export function AssistantWorkspace() {
               onKeyDown={onKeyDown}
               rows={1}
               disabled={busy}
-              placeholder="Ask LifePilot to organize your day..."
+              placeholder="Say anything — remind me, what's left, plan my day…"
               style={{ border: "none", outline: "none", boxShadow: "none" }}
               className="max-h-36 min-h-[44px] min-w-0 flex-1 resize-none border-0 bg-transparent px-2.5 py-2.5 text-[14px] leading-relaxed text-foreground shadow-none outline-none ring-0 focus:border-0 focus:outline-none focus:ring-0 focus-visible:outline-none focus-visible:ring-0 placeholder:truncate placeholder:text-muted-foreground disabled:cursor-not-allowed sm:min-h-[48px] sm:px-3 sm:py-3 sm:text-[15px]"
             />

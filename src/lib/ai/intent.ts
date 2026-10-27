@@ -17,9 +17,10 @@ function stripPolite(text: string): string {
       ""
     )
     .replace(
-      /^(?:i(?:'d| would) like (?:you )?to|i want (?:you )?to|help me(?: to)?)\s+/i,
+      /^(?:i(?:'d| would) like you to|i want you to|help me(?: to)?)\s+/i,
       ""
     )
+    .replace(/^(?:i(?:'d| would) like to)\s+/i, "")
     .replace(/\bplease\b/gi, " ")
     .replace(/\s+/g, " ")
     .trim();
@@ -28,50 +29,78 @@ function stripPolite(text: string): string {
 function rewriteCreates(text: string): string {
   // "remind me to buy milk tomorrow" / "don't forget to …"
   const remind = text.match(
-    /^(?:remind me(?: to)?|don'?t forget(?: to)?|remember(?: to)?|note(?: to)?)\s+(.+)$/i
+    /^(?:remind me(?: to)?|don'?t forget(?: to)?|remember(?: to)?|note(?: to)?|ping me(?: to)?|nudge me(?: to)?)\s+(.+)$/i
   );
   if (remind) return `add ${remind[1]}`;
 
   // "i need to / i have to / i should / i gotta …"
   const need = text.match(
-    /^(?:i\s+)?(?:need|have|gotta|got|should|must|ought)\s+to\s+(.+)$/i
+    /^(?:i\s+)?(?:need|have|gotta|got|should|must|ought|wanna|want)\s+to\s+(.+)$/i
   );
   if (need) return `add ${need[1]}`;
 
+  // "it'd be good if I …" / "it would help to …"
+  const softNeed = text.match(
+    /^(?:it(?:'d| would) (?:be )?(?:good|nice|helpful) (?:if i|to)\s+)(.+)$/i
+  );
+  if (softNeed) return `add ${softNeed[1]}`;
+
   // "put X on my list/todo" / "add X to my list"
   const putOnList = text.match(
-    /^(?:put|add|stick)\s+(.+?)\s+(?:on|to|onto)\s+(?:my\s+)?(?:list|todo|to-?do|tasks?)(?:\s+for\s+(.+))?$/i
+    /^(?:put|add|stick|throw)\s+(.+?)\s+(?:on|to|onto)\s+(?:my\s+)?(?:list|todo|to-?do|tasks?)(?:\s+for\s+(.+))?$/i
   );
   if (putOnList) {
     return putOnList[2] ? `add ${putOnList[1]} for ${putOnList[2]}` : `add ${putOnList[1]}`;
   }
 
   // "todo: buy milk" / "task: essay due friday"
-  const labeled = text.match(/^(?:todo|task|reminder)\s*[:\-]\s*(.+)$/i);
+  const labeled = text.match(/^(?:todo|task|reminder|do)\s*[:\-]\s*(.+)$/i);
   if (labeled) return `add ${labeled[1]}`;
 
   // "new task maths homework" / "a new project called …"
   const newThing = text.match(/^a?\s*new\s+(task|project|checklist|event|meeting)\s+(.+)$/i);
   if (newThing) return `create ${newThing[1]} ${newThing[2]}`;
 
+  // "schedule a call with … tomorrow" (not "schedule my day/week")
+  const scheduleThing = text.match(
+    /^schedule\s+(?:a\s+)?(.+?)(?:\s+(?:for|on|at)\s+(.+))?$/i
+  );
+  if (
+    scheduleThing &&
+    !/\b(?:meeting|appointment|event|exam)\b/i.test(text) &&
+    !/^(?:my\s+)?(?:day|today|week|month|morning|afternoon|evening)$/i.test(
+      scheduleThing[1].trim()
+    )
+  ) {
+    return scheduleThing[2]
+      ? `add ${scheduleThing[1]} for ${scheduleThing[2]}`
+      : `add ${scheduleThing[1]}`;
+  }
+
   return text;
 }
 
 function rewriteCompletes(text: string): string {
   const done = text.match(
-    /^(?:i(?:'ve| have)?\s+)?(?:done(?: with)?|finished|completed|wrapped up)\s+(.+?)(?:\s+(?:already|now))?$/i
+    /^(?:i(?:'ve| have)?\s+)?(?:done(?: with)?|finished|completed|wrapped up|knocked out|sorted(?: out)?)\s+(.+?)(?:\s+(?:already|now))?$/i
   );
   if (done && !/^(?:add|create|make|delete|move|show|what|plan)\b/i.test(done[1])) {
     return `mark ${done[1]} complete`;
   }
 
-  const checkOff = text.match(/^(?:check(?:ed)?\s+off|cross(?:ed)?\s+off)\s+(.+)$/i);
+  const checkOff = text.match(
+    /^(?:check(?:ed)?\s+off|cross(?:ed)?\s+off|tick(?:ed)?\s+off)\s+(.+)$/i
+  );
   if (checkOff) return `mark ${checkOff[1]} complete`;
 
   const markDone = text.match(
     /^(?:mark|set)\s+(.+?)\s+(?:as\s+)?(?:done|complete|completed|finished)$/i
   );
   if (markDone) return `mark ${markDone[1]} complete`;
+
+  // "all done with X"
+  const allDone = text.match(/^all\s+done(?:\s+with)?\s+(.+)$/i);
+  if (allDone) return `mark ${allDone[1]} complete`;
 
   return text;
 }
@@ -87,10 +116,11 @@ function rewriteDeletes(text: string): string {
 function rewriteQueries(text: string): string {
   // "do i have anything today" / "anything for tomorrow" / "what's on today"
   if (
-    /^(?:do i have |is there |are there )?(?:anything|any(?:thing)?(?:\s+tasks?)?|what(?:'s| is|s)?(?:\s+on)?|my (?:schedule|agenda|day)|what do i (?:have|need))\b/i.test(
+    /^(?:do i have |is there |are there |got )?(?:anything|any(?:thing)?(?:\s+tasks?)?|what(?:'s| is|s)?(?:\s+on)?|my (?:schedule|agenda|day)|what do i (?:have|need))\b/i.test(
       text
     ) ||
-    /^(?:my )?(?:tasks?|schedule|agenda|workload)\b/i.test(text)
+    /^(?:my )?(?:tasks?|schedule|agenda|workload|plate)\b/i.test(text) ||
+    /^(?:show|tell|give)\s+me\b/i.test(text)
   ) {
     if (/\btoday\b|\btonight\b/i.test(text)) return "show my tasks for today";
     if (/\btomorrow\b/i.test(text)) return "show my tasks for tomorrow";
@@ -102,6 +132,9 @@ function rewriteQueries(text: string): string {
     if (/\bno deadline\b|\bundated\b|\bwithout (?:a )?deadline\b/i.test(text)) {
       return "show my tasks with no deadline";
     }
+    if (/^(?:show|tell|give)\s+me\s+(?:my\s+)?(?:tasks?|list|schedule|agenda)\b/i.test(text)) {
+      return "show my tasks for today";
+    }
   }
 
   // Bare period questions: "today?", "this week", "tomorrow"
@@ -110,7 +143,7 @@ function rewriteQueries(text: string): string {
   }
 
   // "how busy am i this week" / "how much work …"
-  if (/how (?:busy|much work|packed)/i.test(text)) {
+  if (/how (?:busy|much work|packed|full)/i.test(text)) {
     if (/\bthis week\b/i.test(text)) return "how much work this week";
     if (/\btoday\b/i.test(text)) return "how much work today";
   }
@@ -121,6 +154,7 @@ function rewriteQueries(text: string): string {
   }
 
   if (/^(?:my )?checklists?\??$/i.test(text)) return "show my checklists";
+  if (/^(?:show|list|see)\s+(?:my\s+)?checklists?\b/i.test(text)) return "show my checklists";
 
   return text;
 }

@@ -26,6 +26,7 @@ import {
   selectionCount,
   titleCase,
 } from "./match";
+import { understandInput } from "./understand";
 import type {
   AssistantBlock,
   Board,
@@ -499,8 +500,17 @@ export async function runLocalCommand(
   act: ToolHandler
 ): Promise<LocalCommandResult> {
   const context = cloneContext(incoming);
-  // Rewrite casual / incomplete phrasing into shapes the matchers already know.
-  const rewritten = rewriteIntent(raw);
+
+  // Free-form NLU first: greetings, soft creates/completes/queries, then intent rewrite.
+  const understood = understandInput(raw);
+  if (understood.kind === "reply") {
+    return { message: understood.message, blocks: [], context };
+  }
+
+  const rewritten =
+    understood.kind === "command"
+      ? understood.text
+      : rewriteIntent(raw);
   const workingRaw = rewritten !== raw.trim() ? rewritten : raw;
   const norm = normalizeCommand(workingRaw);
 
@@ -811,7 +821,7 @@ export async function runLocalCommand(
 
   return {
     message:
-      "I didn't quite catch that, but I'm listening. You can say things casually — like “remind me to call mom tomorrow,” “done with maths homework,” “today?,” or “create a checklist for groceries with milk and eggs.” Your tasks weren't changed.",
+      "I want to help, but I'm not sure what you meant. Try saying it the way you'd tell a friend — for example “remind me to call mom tomorrow,” “the essay is done,” “what's left today?,” or “shopping list: milk, eggs, bread.” Nothing was changed.",
     blocks: [],
     context,
   };

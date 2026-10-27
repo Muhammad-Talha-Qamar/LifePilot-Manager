@@ -9,6 +9,8 @@ describe("rewriteIntent", () => {
       "add finish the essay by Friday"
     );
     expect(rewriteIntent("todo: buy milk")).toBe("add buy milk");
+    expect(rewriteIntent("nudge me to stretch tonight")).toBe("add stretch tonight");
+    expect(rewriteIntent("I want to draft the proposal")).toBe("add draft the proposal");
   });
 
   it("strips polite wrappers", () => {
