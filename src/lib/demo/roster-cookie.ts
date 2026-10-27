@@ -7,7 +7,7 @@ import {
 } from "@/lib/auth/session-token";
 import type { DemoUserRecord } from "./users";
 
-/** Signed cookie backup so demo accounts survive Netlify's read-only / ephemeral FS. */
+/** Signed cookie backup so demo accounts survive ephemeral process restarts. */
 export const ROSTER_COOKIE = "lp_demo_roster";
 
 interface RosterFile {

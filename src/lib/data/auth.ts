@@ -19,7 +19,7 @@ export async function requireAuth(): Promise<AuthContext> {
       throw new AuthError("Authentication required");
     }
 
-    // Prefer the durable roster/disk/blobs record when present.
+    // Prefer the durable roster/disk record when present.
     // If this serverless instance lost ephemeral demo files, still trust the
     // HMAC-signed session cookie so sign-up/sign-in don't bounce to /login.
     const user = await findDemoUserById(session.userId);

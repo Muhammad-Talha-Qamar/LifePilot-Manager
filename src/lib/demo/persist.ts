@@ -1,13 +1,12 @@
 import { promises as fs } from "fs";
 import path from "path";
-import { getStore } from "@netlify/blobs";
 
 /**
- * Demo-mode persistence for local files and Netlify.
- * Netlify Functions have a read-only app filesystem — only Blobs (or /tmp) can persist.
+ * Demo-mode persistence for local / Hostinger disk.
+ * Falls back to in-memory when the filesystem is not writable.
  */
 
-type PersistBackend = "disk" | "blobs" | "memory";
+type PersistBackend = "disk" | "memory";
 
 type GlobalPersist = {
   backend: PersistBackend | null;
@@ -29,16 +28,6 @@ function globals(): GlobalPersist {
   return g.__lpDemoPersist;
 }
 
-function isNetlifyRuntime(): boolean {
-  return (
-    process.env.NETLIFY === "true" ||
-    Boolean(process.env.NETLIFY_BLOBS_CONTEXT) ||
-    Boolean(process.env.AWS_LAMBDA_FUNCTION_NAME) ||
-    Boolean(process.env.NETLIFY_SITE_ID) ||
-    Boolean(process.env.SITE_ID)
-  );
-}
-
 function isReadOnlyFsError(error: unknown): boolean {
   if (!error || typeof error !== "object") return false;
   const err = error as { code?: string; message?: string };
@@ -54,58 +43,9 @@ function errorMessage(error: unknown): string {
   return String(error);
 }
 
-function openBlobsStore() {
-  const siteID =
-    process.env.NETLIFY_SITE_ID ||
-    process.env.SITE_ID ||
-    process.env.BLOBS_SITE_ID;
-  const token =
-    process.env.NETLIFY_BLOBS_TOKEN ||
-    process.env.NETLIFY_AUTH_TOKEN ||
-    process.env.BLOBS_TOKEN;
-
-  if (siteID && token) {
-    return getStore({
-      name: "lifepilot-demo",
-      siteID,
-      token,
-      consistency: "strong",
-    });
-  }
-
-  // Auto-configured inside Netlify Functions / OpenNext when context is injected.
-  return getStore({ name: "lifepilot-demo", consistency: "strong" });
-}
-
-async function tryBlobs(): Promise<boolean> {
-  try {
-    const store = openBlobsStore();
-    await store.set("_probe", `ok:${Date.now()}`);
-    const roundTrip = await store.get("_probe", { type: "text" });
-    if (!roundTrip) {
-      globals().lastError = "Netlify Blobs probe write succeeded but read returned empty.";
-      return false;
-    }
-    globals().lastError = null;
-    return true;
-  } catch (error) {
-    globals().lastError = errorMessage(error);
-    console.warn("[lifepilot] Netlify Blobs unavailable:", globals().lastError);
-    return false;
-  }
-}
-
 async function probeBackend(probeDir: string): Promise<PersistBackend> {
   const g = globals();
   if (g.backend) return g.backend;
-
-  if (isNetlifyRuntime()) {
-    if (await tryBlobs()) {
-      g.backend = "blobs";
-      return g.backend;
-    }
-    // Fall through — may still try disk (local netlify dev) then memory.
-  }
 
   try {
     await fs.mkdir(probeDir, { recursive: true });
@@ -116,18 +56,12 @@ async function probeBackend(probeDir: string): Promise<PersistBackend> {
     g.lastError = null;
     return g.backend;
   } catch (error) {
-    if (isReadOnlyFsError(error) || isNetlifyRuntime()) {
-      if (await tryBlobs()) {
-        g.backend = "blobs";
-        return g.backend;
-      }
+    if (isReadOnlyFsError(error)) {
       g.backend = "memory";
       g.lastError =
-        g.lastError ||
-        errorMessage(error) ||
-        "Demo storage is in-memory only on this host.";
+        errorMessage(error) || "Demo storage is in-memory only on this host.";
       console.warn(
-        "[lifepilot] Demo data is in-memory only; accounts use a signed browser cookie, board data may reset between requests. Configure Supabase for lasting storage."
+        "[lifepilot] Demo data is in-memory only; board data may reset between requests. Configure Supabase for lasting storage."
       );
       return g.backend;
     }
@@ -138,14 +72,12 @@ async function probeBackend(probeDir: string): Promise<PersistBackend> {
 export async function getPersistStatus(): Promise<{
   backend: PersistBackend;
   lastError: string | null;
-  netlify: boolean;
 }> {
   const backend = await probeBackend(path.join(process.cwd(), ".demo-data"));
   const g = globals();
   return {
     backend,
     lastError: g.lastError,
-    netlify: isNetlifyRuntime(),
   };
 }
 
@@ -158,17 +90,6 @@ export async function readJsonText(
 
   if (backend === "memory") {
     return g.memory.get(key) ?? null;
-  }
-
-  if (backend === "blobs") {
-    try {
-      const value = await openBlobsStore().get(key, { type: "text" });
-      if (value != null) g.memory.set(key, value);
-      return value ?? g.memory.get(key) ?? null;
-    } catch (error) {
-      g.lastError = errorMessage(error);
-      return g.memory.get(key) ?? null;
-    }
   }
 
   try {
@@ -194,30 +115,13 @@ export async function writeJsonText(
       return;
     }
 
-    if (backend === "blobs") {
-      try {
-        await openBlobsStore().set(key, text);
-      } catch (error) {
-        g.lastError = errorMessage(error);
-        console.warn("[lifepilot] Blobs write failed; kept in-memory copy:", g.lastError);
-      }
-      return;
-    }
-
     try {
       await fs.mkdir(path.dirname(diskPath), { recursive: true });
       await fs.writeFile(diskPath, text, "utf8");
     } catch (error) {
       if (!isReadOnlyFsError(error)) throw error;
-      g.backend = null;
-      const next = await probeBackend(path.dirname(diskPath));
-      if (next === "blobs") {
-        try {
-          await openBlobsStore().set(key, text);
-        } catch (blobsError) {
-          g.lastError = errorMessage(blobsError);
-        }
-      }
+      g.backend = "memory";
+      g.lastError = errorMessage(error);
     }
   });
   await g.writeQueue;

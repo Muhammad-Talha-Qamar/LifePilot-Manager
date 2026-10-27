@@ -13,7 +13,7 @@ node_modules/
 # testing
 /coverage
 
-# next.js build output — never commit (rebuilds on Netlify)
+# next.js build output — never commit (rebuilds on Hostinger)
 .next/
 out/
 dist/
@@ -34,10 +34,6 @@ yarn-error.log*
 # env files (secrets — never commit)
 .env*
 !.env.example
-
-# vercel / netlify local
-.vercel
-.netlify
 
 # typescript
 *.tsbuildinfo

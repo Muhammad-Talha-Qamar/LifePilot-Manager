@@ -51,7 +51,7 @@ export async function getDemoStore(
   profile?: { email: string; fullName?: string | null }
 ): Promise<DemoStore> {
   const g = globals();
-  // Prefer disk/blobs so HMR / split module instances stay consistent.
+  // Prefer disk so HMR / split module instances stay consistent.
   const disk = await readFromDisk(userId);
   if (disk) {
     g.memoryByUser.set(userId, disk);

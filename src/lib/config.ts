@@ -1,5 +1,5 @@
 /**
- * Runtime configuration from `.env` / `.env.example` / Netlify env vars.
+ * Runtime configuration from `.env` / `.env.example` / Hostinger env vars.
  * Secrets are only read on the server; NEXT_PUBLIC_* are available in the browser.
  */
 

@@ -11,7 +11,7 @@ import {
 const USERS_PATH = path.join(process.cwd(), ".demo-data", "users.json");
 const USERS_KEY = "users";
 
-/** Light scrypt params — default Node scrypt is too heavy/slow for Netlify Functions. */
+/** Light scrypt params — keeps demo signup responsive on shared hosting. */
 const SCRYPT = { N: 1024, r: 8, p: 1, maxmem: 32 * 1024 * 1024 } as const;
 
 export interface DemoUserRecord {

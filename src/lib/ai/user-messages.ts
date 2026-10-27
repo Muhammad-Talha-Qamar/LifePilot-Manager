@@ -43,7 +43,7 @@ const PATTERNS: { test: RegExp; message: string }[] = [
   {
     test: /EROFS|EACCES|read-?only file system/i,
     message:
-      "This hosted site can't save demo data to disk. Actions should work after the latest deploy; for lasting accounts, add Supabase env vars on Netlify.",
+      "This hosted site can't save demo data to disk. For lasting accounts, add Supabase env vars on Hostinger and turn off demo mode.",
   },
   {
     test: /database|postgres|supabase|query failed|PGRST|relation |column /i,

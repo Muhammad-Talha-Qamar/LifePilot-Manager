@@ -18,10 +18,10 @@ async function parseApiError(res: Response): Promise<string> {
     const json = JSON.parse(text) as { error?: string };
     if (json.error) return json.error;
   } catch {
-    // Non-JSON body (often Netlify's HTML 404 when the Next runtime isn't active).
+    // Non-JSON body (misconfigured deploy / proxy returning HTML).
   }
   if (res.status === 404 || /page not found/i.test(text)) {
-    return "Sign-up API is not available on this deploy. In Netlify, confirm the Next.js runtime plugin is enabled and redeploy.";
+    return "Sign-up API is not available on this deploy. Redeploy from GitHub main and check /api/health.";
   }
   if (res.status >= 500) {
     return "The server could not create your account. Please try again in a moment.";
@@ -37,7 +37,7 @@ export function AuthForm({ mode }: { mode: Mode }) {
   const [password, setPassword] = useState("");
   const [fullName, setFullName] = useState("");
   const [busy, setBusy] = useState(false);
-  // Demo mode uses /api/auth/* (works on Netlify without Supabase).
+  // Demo mode uses /api/auth/* (works on Hostinger without Supabase).
   const useSupabase = !isDemoMode();
 
   async function onSubmit(event: FormEvent) {
