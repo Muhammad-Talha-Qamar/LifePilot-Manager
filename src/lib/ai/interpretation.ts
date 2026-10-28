@@ -42,7 +42,8 @@ type AmbiguityRule = {
 
 const AMBIGUITY_RULES: AmbiguityRule[] = [
   {
-    pattern: /\bnext\s+weak\b/i,
+    // "next weak" / "nex weak" — real English "weak" must not silently become "week"
+    pattern: /\bnex(?:t)?\s+weak\b/i,
     question: "Did you mean next week?",
     suggestion: "next week",
   },
@@ -151,20 +152,34 @@ export function resolveInterpretation(raw: string): InterpretationDecision {
     };
   }
 
-  const ambiguity = findAmbiguity(original);
+  // Surface-correct first so "nex weak" / "assigment" become visible to ambiguity rules.
+  const interpreted = surfaceCorrect(original);
+
+  // Check both the raw text and the repaired text — typos often hide the homophone.
+  const ambiguity =
+    findAmbiguity(original) ||
+    findAmbiguity(interpreted) ||
+    findAmbiguity(interpreted.replace(/\.$/, ""));
   if (ambiguity) {
+    // Prefer substituting on the spelling-corrected sentence so other typos
+    // (assigment→assignment, nex→next) stay fixed in the accepted follow-up.
+    let accepted: string;
+    if (ambiguity.pattern.test(interpreted)) {
+      accepted = interpreted.replace(ambiguity.pattern, ambiguity.suggestion);
+    } else {
+      accepted = surfaceCorrect(
+        original.replace(ambiguity.pattern, ambiguity.suggestion)
+      );
+    }
     return {
       original,
-      interpreted: polishSentence(
-        original.replace(ambiguity.pattern, ambiguity.suggestion)
-      ),
+      interpreted: polishSentence(accepted),
       showInterpretation: false,
       clarification: ambiguity.question,
       confidence: 0.45,
     };
   }
 
-  const interpreted = surfaceCorrect(original);
   const same = compareKey(original) === compareKey(interpreted);
 
   // Also consider normalizeInput (slang / multilingual) for display when

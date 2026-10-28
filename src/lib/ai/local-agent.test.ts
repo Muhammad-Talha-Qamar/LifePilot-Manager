@@ -687,6 +687,37 @@ describe("local assistant commands", () => {
     expect(confirmed.context.pendingInterpretation == null).toBe(true);
   });
 
+  it("asks for misspelled nex weak before changing a deadline", async () => {
+    const env = harness();
+    const asked = await runLocalCommand(
+      "move my assigment to nex weak.",
+      emptyContext(),
+      env.board,
+      env.act
+    );
+    expect(asked.message).toMatch(/next week/i);
+    expect(asked.blocks.some((block) => block.type === "interpretation")).toBe(true);
+    expect(asked.context.pendingInterpretation?.acceptedText).toMatch(/assignment/i);
+    expect(asked.context.pendingInterpretation?.acceptedText).toMatch(/next week/i);
+    expect(env.calls).toHaveLength(0);
+  });
+
+  it("creates buy milk from i need to by milk tomorow", async () => {
+    const env = harness();
+    const result = await runLocalCommand(
+      "i need to by milk tomorow.",
+      emptyContext(),
+      env.board,
+      env.act
+    );
+    expect(result.blocks.some((block) => block.type === "interpretation")).toBe(true);
+    expect(env.calls.some((call) => call.name === "create_task")).toBe(true);
+    const create = env.calls.find((call) => call.name === "create_task");
+    expect(String(create?.args.title)).toMatch(/buy milk|milk/i);
+    expect(result.message).toMatch(/milk|added|created/i);
+    expect(result.message).not.toMatch(/couldn't create/i);
+  });
+
   it("does not show interpretation for clear messages", async () => {
     const env = harness();
     const result = await runLocalCommand(

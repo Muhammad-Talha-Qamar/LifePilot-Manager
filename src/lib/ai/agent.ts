@@ -486,7 +486,44 @@ export async function runAgent(
 
   if (options?.dismissPending) {
     context.pending = null;
+    context.pendingInterpretation = null;
     return finish("Cancelled. I did not change anything.");
+  }
+
+  // Resolve a pending "Did you mean …?" before the model or local path acts.
+  if (context.pendingInterpretation) {
+    const answer = userMessage.trim().toLowerCase();
+    if (/^(?:yes|yeah|yep|yup|sure|correct|right|exactly|please|ok|okay|do it|go ahead|confirm)\b/.test(answer)) {
+      const accepted = context.pendingInterpretation.acceptedText;
+      context.pendingInterpretation = null;
+      return runAgent(
+        [...messages.slice(0, -1), { role: "user", content: accepted }],
+        auth,
+        { ...options, context }
+      );
+    }
+    if (/^(?:no|nope|nah|cancel|never ?mind|wrong|incorrect)\b/.test(answer)) {
+      context.pendingInterpretation = null;
+      return finish("Got it — I left everything as it is. Tell me what you meant.");
+    }
+    // Rephrased — drop the pending ask and continue with the new text.
+    context.pendingInterpretation = null;
+  }
+
+  // Ambiguous spelling (e.g. "next weak") — ask before any tools run.
+  {
+    const decision = resolveInterpretation(userMessage);
+    if (decision.clarification) {
+      context.pendingInterpretation = {
+        question: decision.clarification,
+        acceptedText: decision.interpreted.replace(/\.$/, ""),
+      };
+      const block = interpretationBlock(decision);
+      return finish(decision.clarification, {
+        blocks: block ? [block] : [],
+        mode: openaiConfigured ? "model" : "local",
+      });
+    }
   }
 
   if (options?.confirm) {

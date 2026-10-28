@@ -188,7 +188,8 @@ describe("language eval — spelling & typing mistakes", () => {
   it("repairs plz / assignment / next week", () => {
     const n = normalizeInput("plz move my assigment to nex week");
     expect(n.toLowerCase()).toMatch(/please/);
-    expect(n.toLowerCase()).toMatch(/homework|assignment/);
+    expect(n.toLowerCase()).toMatch(/assignment/);
+    expect(n.toLowerCase()).not.toMatch(/homework/);
     expect(n.toLowerCase()).toContain("next week");
   });
 

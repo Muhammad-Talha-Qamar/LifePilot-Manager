@@ -57,8 +57,30 @@ describe("resolveInterpretation", () => {
     expect(block?.label).toBe("Did you mean");
   });
 
+  it("asks for nex weak after spelling repairs assignment", () => {
+    const decision = resolveInterpretation("move my assigment to nex weak.");
+    expect(decision.clarification).toMatch(/next week/i);
+    expect(decision.interpreted).toMatch(/assignment/i);
+    expect(decision.interpreted).toMatch(/next week/i);
+    expect(decision.showInterpretation).toBe(false);
+  });
+
   it("does not fuzzy-collapse weak into week silently", () => {
     expect(correctSpellingAndGrammar("next weak")).toMatch(/weak/i);
+  });
+
+  it("keeps by Friday distinct from buy", () => {
+    const decision = resolveInterpretation("Remind me to call Mom by Friday");
+    expect(decision.showInterpretation).toBe(false);
+    expect(decision.interpreted.toLowerCase()).toMatch(/by friday/);
+    expect(decision.interpreted.toLowerCase()).not.toMatch(/buy friday/);
+  });
+
+  it("repairs i need to by milk tomorow", () => {
+    const decision = resolveInterpretation("i need to by milk tomorow.");
+    expect(decision.showInterpretation).toBe(true);
+    expect(decision.interpreted).toMatch(/buy milk/i);
+    expect(decision.interpreted).toMatch(/tomorrow/i);
   });
 });
 

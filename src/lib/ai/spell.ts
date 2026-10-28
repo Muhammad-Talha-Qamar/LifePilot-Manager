@@ -481,6 +481,10 @@ const EXPLICIT: Record<string, string> = {
   yestrday: "yesterday",
   yestarday: "yesterday",
   ysterday: "yesterday",
+  nex: "next",
+  nnext: "next",
+  wek: "week",
+  weeek: "week",
   // weekdays
   mondya: "monday",
   monady: "monday",
