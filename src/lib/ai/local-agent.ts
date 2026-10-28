@@ -1,4 +1,4 @@
-import { formatInTimeZone, fromZonedTime } from "date-fns-tz";
+import { fromZonedTime } from "date-fns-tz";
 import type { CalendarEvent, ChecklistItem, Project, Task, UserMemory } from "@/types";
 import {
   addCalendarDays,

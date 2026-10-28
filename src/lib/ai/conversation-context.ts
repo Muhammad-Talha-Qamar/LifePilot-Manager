@@ -141,7 +141,7 @@ export function expandEllipticalCreate(
   if (!continuation && !bareLikeCreate) return null;
   if (!continuation && bareLikeCreate && /^(?:add|create)\b/i.test(trimmed)) return null;
 
-  let body = stripContinuationPrefix(trimmed);
+  const body = stripContinuationPrefix(trimmed);
   // "do the same for English" handled elsewhere.
   if (/^do the same\b/i.test(body)) return null;
 
@@ -253,7 +253,7 @@ export function verifyTaskId(
 }
 
 export function shortenTitle(title: string): string {
-  let t = title
+  const t = title
     .replace(/^(?:please\s+)?(?:finish|complete|do|submit|write|prepare|review|revise)\s+/i, "")
     .replace(/\s+\((?:urgent|asap|todo)\)\s*$/i, "")
     .replace(/\s{2,}/g, " ")
