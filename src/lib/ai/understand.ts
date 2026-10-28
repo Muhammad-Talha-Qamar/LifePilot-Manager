@@ -141,6 +141,14 @@ function softQuery(text: string): string | null {
     return "show my overdue tasks";
   }
 
+  // "show my upcoming task(s)"
+  if (
+    /\b(?:show|list|see|view|display)\s+(?:me\s+|my\s+)?upcoming\s+tasks?\b/i.test(text) ||
+    /\bmy\s+upcoming\s+tasks?\b/i.test(text)
+  ) {
+    return "show my tasks for next 7 days";
+  }
+
   return null;
 }
 

@@ -652,4 +652,50 @@ describe("local assistant commands", () => {
     expect(asked.blocks.some((block) => block.type === "confirm")).toBe(true);
     expect(env.calls).toHaveLength(0);
   });
+
+  it("corrects spelling, shows interpretation, and saves the task", async () => {
+    const env = harness();
+    const result = await runLocalCommand(
+      "Add homwork for tomorow",
+      emptyContext(),
+      env.board,
+      env.act
+    );
+    expect(result.blocks.some((block) => block.type === "interpretation")).toBe(true);
+    const interp = result.blocks.find((block) => block.type === "interpretation");
+    expect(interp && interp.type === "interpretation" && interp.text).toMatch(/homework/i);
+    expect(result.message).toMatch(/homework/i);
+    expect(env.calls.some((call) => call.name === "create_task")).toBe(true);
+    const create = env.calls.find((call) => call.name === "create_task");
+    expect(String(create?.args.title)).toMatch(/homework/i);
+  });
+
+  it("asks before acting on ambiguous weak→week", async () => {
+    const env = harness();
+    const asked = await runLocalCommand(
+      "Move the meeting to next weak",
+      emptyContext(),
+      env.board,
+      env.act
+    );
+    expect(asked.message).toMatch(/next week/i);
+    expect(asked.context.pendingInterpretation?.acceptedText).toMatch(/week/i);
+    expect(env.calls).toHaveLength(0);
+
+    const confirmed = await runLocalCommand("yes", asked.context, env.board, env.act);
+    // May ask which meeting / fail to find — but must not leave pending interpretation
+    expect(confirmed.context.pendingInterpretation == null).toBe(true);
+  });
+
+  it("does not show interpretation for clear messages", async () => {
+    const env = harness();
+    const result = await runLocalCommand(
+      "Add maths homework for tomorrow.",
+      emptyContext(),
+      env.board,
+      env.act
+    );
+    expect(result.blocks.some((block) => block.type === "interpretation")).toBe(false);
+    expect(env.calls.some((call) => call.name === "create_task")).toBe(true);
+  });
 });

@@ -244,13 +244,26 @@ export function AssistantWorkspace() {
                 </div>
               ) : (
                 <div className="ai-message-assistant w-full min-w-0 max-w-full space-y-2 sm:space-y-2.5">
+                  {message.blocks &&
+                    message.blocks.some((block) => block.type === "interpretation") &&
+                    !message.streaming && (
+                      <MessageBlocks
+                        blocks={message.blocks.filter(
+                          (block) => block.type === "interpretation"
+                        )}
+                      />
+                    )}
                   {(message.content || message.streaming) && (
                     <div className="ai-reply-text min-w-0">
                       <AssistantText content={message.content} streaming={message.streaming} />
                     </div>
                   )}
                   {message.blocks && message.blocks.length > 0 && !message.streaming && (
-                    <MessageBlocks blocks={message.blocks} />
+                    <MessageBlocks
+                      blocks={message.blocks.filter(
+                        (block) => block.type !== "interpretation"
+                      )}
+                    />
                   )}
                 </div>
               )}

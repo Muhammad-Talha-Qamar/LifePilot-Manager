@@ -79,6 +79,13 @@ const contextSchema = z.object({
     )
     .max(8)
     .optional(),
+  pendingInterpretation: z
+    .object({
+      question: z.string().max(500),
+      acceptedText: z.string().max(800),
+    })
+    .nullable()
+    .optional(),
 });
 
 const bodySchema = z.object({

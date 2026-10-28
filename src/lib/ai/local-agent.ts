@@ -14,6 +14,10 @@ import {
   toProjectCard,
   toTaskCard,
 } from "./blocks";
+import {
+  interpretationBlock,
+  resolveInterpretation,
+} from "./interpretation";
 import { interpretUtterance } from "./interpret";
 import { rewriteIntent } from "./intent";
 import {
@@ -64,7 +68,29 @@ function cloneContext(context: ConversationContext): ConversationContext {
     focus: context.focus ?? null,
     pending: context.pending ?? null,
     pendingClarification: context.pendingClarification ?? null,
+    pendingInterpretation: context.pendingInterpretation ?? null,
   };
+}
+
+function withInterpretation(
+  result: LocalCommandResult,
+  interpBlock: AssistantBlock | null
+): LocalCommandResult {
+  if (!interpBlock) return result;
+  return {
+    ...result,
+    blocks: [interpBlock, ...result.blocks],
+  };
+}
+
+function isAffirmative(norm: string): boolean {
+  return /^(?:yes|yeah|yep|yup|sure|correct|right|exactly|please|ok|okay|do it|go ahead|confirm)$/i.test(
+    norm
+  );
+}
+
+function isNegative(norm: string): boolean {
+  return /^(?:no|nope|nah|cancel|never ?mind|wrong|incorrect)$/i.test(norm);
 }
 
 function failed(action: string, error?: string): string {
@@ -537,8 +563,50 @@ export async function runLocalCommand(
 ): Promise<LocalCommandResult> {
   const context = cloneContext(incoming);
 
+  // Resolve a pending "Did you mean …?" before anything else.
+  if (context.pendingInterpretation) {
+    const answer = normalizeCommand(raw);
+    if (isAffirmative(answer)) {
+      const accepted = context.pendingInterpretation.acceptedText;
+      context.pendingInterpretation = null;
+      return runLocalCommand(accepted, context, board, act);
+    }
+    if (isNegative(answer)) {
+      context.pendingInterpretation = null;
+      return {
+        message: "Got it — I left everything as it is. Tell me what you meant.",
+        blocks: [],
+        context,
+      };
+    }
+    // User rephrased — drop the pending ask and continue with the new text.
+    context.pendingInterpretation = null;
+  }
+
+  // Google-like spelling / intent surface interpretation (before acting).
+  const decision = resolveInterpretation(raw);
+  const interpBlock = interpretationBlock(decision);
+
+  if (decision.clarification) {
+    context.pendingInterpretation = {
+      question: decision.clarification,
+      acceptedText: decision.interpreted.replace(/\.$/, ""),
+    };
+    return {
+      message: decision.clarification,
+      blocks: interpBlock ? [interpBlock] : [],
+      context,
+    };
+  }
+
   // Free-form NLU first: greetings, soft creates/completes/queries, then intent rewrite.
-  const understood = understandInput(raw);
+  // Prefer the surface-corrected text so typos reach understand/rewrite cleanly.
+  const inputForNlu = decision.showInterpretation
+    ? decision.interpreted.replace(/\.$/, "")
+    : raw;
+
+  const coreResult = await (async (): Promise<LocalCommandResult> => {
+  const understood = understandInput(inputForNlu);
   if (understood.kind === "reply") {
     return { message: understood.message, blocks: [], context };
   }
@@ -546,7 +614,7 @@ export async function runLocalCommand(
   let rewritten =
     understood.kind === "command"
       ? understood.text
-      : rewriteIntent(raw);
+      : rewriteIntent(inputForNlu);
 
   // Recover via phrasebook intent+slots only when we still lack a canonical verb.
   const rewrittenNorm = normalizeCommand(rewritten);
@@ -557,13 +625,16 @@ export async function runLocalCommand(
     /^(?:no|nope|wait|actually|sorry)\b.+\b(?:i meant|make it|change it)\b/.test(rewrittenNorm) ||
     /^i meant\b/.test(rewrittenNorm);
   if (!looksCanonical) {
-    const interpreted = interpretUtterance(raw);
+    const interpreted = interpretUtterance(inputForNlu);
     if (interpreted.canonical && interpreted.confidence >= 0.22) {
       rewritten = interpreted.canonical;
     }
   }
 
-  const workingRaw = rewritten !== raw.trim() ? rewritten : raw;
+  const workingRaw =
+    rewritten.trim().toLowerCase() !== inputForNlu.trim().toLowerCase()
+      ? rewritten
+      : inputForNlu;
   const norm = normalizeCommand(workingRaw);
 
   // Only block explicit project create/manage — not every mention of the word.
@@ -599,7 +670,7 @@ export async function runLocalCommand(
       (/^(today|tonight|tomorrow|yesterday|this \w+|next \w+|monday|tuesday|wednesday|thursday|friday|saturday|sunday)$/.test(
         norm
       )
-        ? ([null, norm] as RegExpMatchArray)
+        ? (["", norm] as unknown as RegExpMatchArray)
         : null);
     if (focusDate?.[1]) {
       return correctFocused(focusDate[1], workingRaw, context, board, act);
@@ -904,6 +975,9 @@ export async function runLocalCommand(
     blocks: [],
     context,
   };
+  })();
+
+  return withInterpretation(coreResult, interpBlock);
 }
 
 async function correctFocused(

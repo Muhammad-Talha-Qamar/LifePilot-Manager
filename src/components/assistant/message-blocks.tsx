@@ -34,8 +34,16 @@ function priorityVariant(priority: string): "danger" | "warning" | "secondary" {
 }
 
 export function MessageBlocks({ blocks }: { blocks: AssistantBlock[] }) {
+  if (!blocks.length) return null;
+  const onlyInterpretation = blocks.every((block) => block.type === "interpretation");
   return (
-    <div className="mt-3.5 w-full min-w-0 max-w-full space-y-2.5">
+    <div
+      className={
+        onlyInterpretation
+          ? "w-full min-w-0 max-w-full space-y-2"
+          : "mt-1 w-full min-w-0 max-w-full space-y-2.5 sm:mt-1.5"
+      }
+    >
       {blocks.map((block, index) => (
         <Block key={`${block.type}-${index}`} block={block} />
       ))}
@@ -165,6 +173,22 @@ function Block({ block }: { block: AssistantBlock }) {
   if (block.type === "confirm") return <ConfirmBlock prompt={block.prompt} action={block.action} />;
   if (block.type === "notice") {
     return <p className="text-sm text-muted-foreground">{block.text}</p>;
+  }
+  if (block.type === "interpretation") {
+    return (
+      <div
+        className={
+          block.uncertain
+            ? "ai-interpretation ai-interpretation--uncertain animate-interpretation"
+            : "ai-interpretation animate-interpretation"
+        }
+        role="status"
+        aria-label={`${block.label}: ${block.text}`}
+      >
+        <span className="ai-interpretation__label">{block.label}</span>
+        <span className="ai-interpretation__text">“{block.text}”</span>
+      </div>
+    );
   }
   return null;
 }

@@ -39,6 +39,11 @@ export interface ConversationContext {
   } | null;
   pending?: PendingAction | null;
   pendingClarification?: PendingClarification | null;
+  /** Ambiguous spelling / intent awaiting a yes/no (Google-like confirm). */
+  pendingInterpretation?: {
+    question: string;
+    acceptedText: string;
+  } | null;
   undo?: UndoEntry[];
 }
 
@@ -112,6 +117,15 @@ export type AssistantBlock =
   | { type: "schedule"; title: string; saved: false; note: string; slots: ScheduleSlot[] }
   | { type: "confirm"; prompt: string; action: PendingAction }
   | { type: "notice"; tone: "info" | "success" | "error"; text: string }
+  | {
+      type: "interpretation";
+      /** Short label, e.g. "I think you mean" or "Did you mean". */
+      label: string;
+      /** Corrected / interpreted sentence. */
+      text: string;
+      /** True when asking for confirmation instead of proceeding. */
+      uncertain?: boolean;
+    }
   | { type: "steps"; title: string; steps: AgentStep[] }
   | { type: "followups"; suggestions: string[] };
 

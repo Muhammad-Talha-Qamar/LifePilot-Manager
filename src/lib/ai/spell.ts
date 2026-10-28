@@ -7,10 +7,34 @@
  *    Damerau–Levenshtein (insert/delete/substitute/transpose).
  * 3) Prefer keyboard-adjacent substitutions when scores tie.
  * 4) Fix common broken grammar / missing spaces that break intent matchers.
+ * 5) Never fuzzy-correct protected real English words (weak≠week) — the
+ *    interpretation layer asks when those appear in date phrases.
  *
  * Content titles (essay names, people) are left alone unless they are very
  * close to a command/time word — we never invent meaning, only repair surface form.
  */
+
+/** Valid English words that must not be fuzzy-corrected into domain vocab. */
+const PROTECTED_WORDS = new Set([
+  "weak", // ≠ week — interpretation asks in date phrases
+  "bye",
+  "form",
+  "from",
+  "then",
+  "than",
+  "were",
+  "where",
+  "wear",
+  "ware",
+  "peace",
+  "piece",
+  "principal",
+  "principle",
+]);
+
+export function isProtectedWord(word: string): boolean {
+  return PROTECTED_WORDS.has(word.toLowerCase());
+}
 
 /** QWERTY neighbor map for typographic error preference. */
 const KEY_NEIGHBORS: Record<string, string> = {
@@ -233,6 +257,7 @@ const DOMAIN_VOCAB = [
   "briefing",
   "rundown",
   "recap",
+  "upcoming",
   // time
   "today",
   "tonight",
@@ -275,6 +300,7 @@ const DOMAIN_VOCAB = [
   "paper",
   "form",
   "by",
+  "buy",
   "friday",
   "monday",
   "tuesday",
@@ -533,10 +559,24 @@ const EXPLICIT: Record<string, string> = {
   homewerk: "homework",
   homewor: "homework",
   homewrok: "homework",
+  homwork: "homework",
+  homewrk: "homework",
+  hoemwork: "homework",
   assingment: "assignment",
   asignmnt: "assignment",
   assigment: "assignment",
   asignment: "assignment",
+  upcomming: "upcoming",
+  upcomiing: "upcoming",
+  upcomin: "upcoming",
+  upcomiingg: "upcoming",
+  reshedule: "reschedule",
+  rescedule: "reschedule",
+  reschedual: "reschedule",
+  reschedul: "reschedule",
+  meting: "meeting",
+  meetin: "meeting",
+  meething: "meeting",
   grocieres: "groceries",
   grocerys: "groceries",
   grocries: "groceries",
@@ -730,6 +770,7 @@ const FUNCTION_TARGETS = new Set([
 function bestCorrection(token: string): string | null {
   const lower = token.toLowerCase();
   if (!lower || NEVER_CORRECT.has(lower)) return null;
+  if (isProtectedWord(lower)) return null;
   if (VOCAB_SET.has(lower)) return null;
   if (EXPLICIT[lower]) return EXPLICIT[lower];
 
@@ -804,6 +845,15 @@ function splitGluedCommands(text: string): string {
     .replace(/\bcompleteds?\b/gi, "completed");
 }
 
+/** Phrase-level repairs that single-token fuzzy cannot do. */
+function applyPhraseRepairs(text: string): string {
+  return text
+    .replace(/\bto\s+by\b/gi, "to buy")
+    .replace(/\b(add|create)\s+by\s+/gi, "$1 buy ")
+    .replace(/\bupcomming\b/gi, "upcoming")
+    .replace(/\bhomwork\b/gi, "homework");
+}
+
 /** Light grammar cleanup that helps intent regexes. */
 function fixGrammar(text: string): string {
   return (
@@ -839,6 +889,7 @@ export function correctSpellingAndGrammar(raw: string): string {
 
   // Grammar first so "i has" becomes "i have" before fuzzy can turn "has" into "was".
   text = fixGrammar(text);
+  text = applyPhraseRepairs(text);
 
   // Explicit whole-token map + fuzzy domain repair
   text = text
@@ -859,6 +910,7 @@ export function correctSpellingAndGrammar(raw: string): string {
     })
     .join("");
 
+  text = applyPhraseRepairs(text);
   text = fixGrammar(text);
   return text.replace(/\s+/g, " ").trim();
 }

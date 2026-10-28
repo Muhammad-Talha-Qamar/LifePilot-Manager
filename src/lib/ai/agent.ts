@@ -20,6 +20,10 @@ import {
   toolActivityLabel,
 } from "./agent-mode";
 import { blocksFromToolCalls } from "./blocks";
+import {
+  interpretationBlock,
+  resolveInterpretation,
+} from "./interpretation";
 import { rewriteIntent } from "./intent";
 import { runLocalCommand } from "./local-agent";
 import {
@@ -42,6 +46,19 @@ import { emptyContext } from "./types";
 import { understandInput } from "./understand";
 import { applyUndoEntry, snapshotForUndo, undoEntryFor } from "./undo";
 import { friendlyFailure, humanizeError } from "./user-messages";
+
+/** Attach Google-like "I think you mean" block when local NLU corrected spelling. */
+function attachInterpretation(
+  userMessage: string,
+  blocks: AssistantBlock[]
+): AssistantBlock[] {
+  if (blocks.some((block) => block.type === "interpretation")) return blocks;
+  const decision = resolveInterpretation(userMessage);
+  // Clarifications short-circuit inside the local agent before writes.
+  if (decision.clarification) return blocks;
+  const block = interpretationBlock(decision);
+  return block ? [block, ...blocks] : blocks;
+}
 
 const MAX_TOOL_ROUNDS = 12;
 const REQUEST_TIMEOUT_MS = 45000;
@@ -101,10 +118,12 @@ function buildSystemPrompt(
 You understand any natural language: slang, typos, broken grammar, incomplete sentences, voice-to-text messiness, emoji shorthand, romanized Urdu/Hindi, Spanish helpers, and indirect phrasing. You do not wait for fixed command templates. Infer intent, then act with tools.
 
 ## Spelling and grammar
-- Mentally correct obvious typos before deciding the action ("tommorow"→tomorrow, "remnd me"→remind me, "cheklist"→checklist, "waht left"→what's left).
+- Mentally correct obvious typos before deciding the action ("tommorow"→tomorrow, "remnd me"→remind me, "cheklist"→checklist, "waht left"→what's left, "homwork"→homework, "by milk"→buy milk, "upcomming"→upcoming, "reshedule"→reschedule).
 - Broken grammar is fine: missing articles, wrong tense, word salad, doubled words, missing spaces ("remindme", "showme today").
 - Never refuse or lecture about spelling. Act on the intended meaning.
 - The local interpretation hint (if present) already applies fuzzy spelling repair — use it as a strong prior, then verify with tools.
+- The UI may already show a subtle "I think you mean …" chip. Do NOT repeat that phrase in your reply. Just confirm the action result (e.g. "Added Homework for tomorrow.").
+- If a date phrase is genuinely ambiguous (e.g. "next weak" could be week), ask a short yes/no question instead of guessing. Do not run destructive tools until clarified.
 
 You help with tasks, checklists, calendar events, and reminders by changing real saved records through tools. This product does not support projects — never create, list, update, delete, or mention projects. Suggest tasks or checklists instead.
 
@@ -586,12 +605,16 @@ export async function runAgent(
     ) {
       return finish(
         `${local.message}\n\n(Ask mode is read-only — switch to Agent to make changes.)`,
-        { blocks: local.blocks, mode: "local", demoFallback }
+        {
+          blocks: attachInterpretation(userMessage, local.blocks),
+          mode: "local",
+          demoFallback,
+        }
       );
     }
 
     return finish(local.message, {
-      blocks: local.blocks,
+      blocks: attachInterpretation(userMessage, local.blocks),
       mode: "local",
       demoFallback,
     });
@@ -657,7 +680,10 @@ export async function runAgent(
 
       if (!streamed.tool_calls.length) {
         return finish(streamed.content.trim() || "Done.", {
-          blocks: blocksFromToolCalls(toolCalls, timezone),
+          blocks: attachInterpretation(
+            userMessage,
+            blocksFromToolCalls(toolCalls, timezone)
+          ),
           mode: "model",
         });
       }
@@ -718,7 +744,10 @@ export async function runAgent(
       message = "I had to stop before finishing, and nothing was changed.";
     }
     return finish(message, {
-      blocks: blocksFromToolCalls(toolCalls, timezone),
+      blocks: attachInterpretation(
+        userMessage,
+        blocksFromToolCalls(toolCalls, timezone)
+      ),
       error: "max_rounds",
       mode: "model",
     });
@@ -730,7 +759,10 @@ export async function runAgent(
           ? `I stopped as requested. Some earlier changes may already be saved (${succeeded.map((call) => toolLabel(call.name)).join(", ")}).`
           : "I stopped as requested. Nothing new was saved from this reply.",
         {
-          blocks: blocksFromToolCalls(toolCalls, timezone),
+          blocks: attachInterpretation(
+            userMessage,
+            blocksFromToolCalls(toolCalls, timezone)
+          ),
           error: "aborted",
           mode: "model",
         }
@@ -761,7 +793,10 @@ export async function runAgent(
         ? `${humanizeError(raw)} Some earlier changes may already be saved (${succeeded.map((call) => toolLabel(call.name)).join(", ")}).`
         : `${humanizeError(raw)} Nothing was changed.`,
       {
-        blocks: blocksFromToolCalls(toolCalls, timezone),
+        blocks: attachInterpretation(
+          userMessage,
+          blocksFromToolCalls(toolCalls, timezone)
+        ),
         error: raw,
         mode: "model",
       }

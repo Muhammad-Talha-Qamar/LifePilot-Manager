@@ -362,6 +362,19 @@ body {
   }
 }
 
+@keyframes interpretation-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+    filter: blur(2px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+    filter: blur(0);
+  }
+}
+
 /* -------------------------------------------------------------------------- */
 /* Utility classes                                                             */
 /* -------------------------------------------------------------------------- */
@@ -384,6 +397,10 @@ body {
 
 .animate-slide-right {
   animation: slide-right var(--duration-base) var(--ease-out) both;
+}
+
+.animate-interpretation {
+  animation: interpretation-in 420ms var(--ease-out) both;
 }
 
 .animate-page-enter {
@@ -1245,6 +1262,57 @@ body {
     color-mix(in oklab, #22d3ee 6%, var(--surface-soft))
   );
   border-bottom: 1px solid color-mix(in oklab, var(--border) 80%, #a78bfa 20%);
+}
+
+/* Google-like spelling / intent interpretation chip */
+.ai-interpretation {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.35rem 0.55rem;
+  margin: 0 0 0.65rem;
+  padding: 0.45rem 0.7rem;
+  border-radius: 0.75rem;
+  border: 1px solid color-mix(in oklab, var(--border) 70%, #67e8f9 30%);
+  background: linear-gradient(
+    120deg,
+    color-mix(in oklab, #67e8f9 10%, var(--surface-soft)),
+    color-mix(in oklab, #a78bfa 8%, var(--surface-soft))
+  );
+  max-width: 100%;
+}
+
+.ai-interpretation--uncertain {
+  border-color: color-mix(in oklab, var(--border) 65%, #fbbf24 35%);
+  background: linear-gradient(
+    120deg,
+    color-mix(in oklab, #fde68a 12%, var(--surface-soft)),
+    color-mix(in oklab, #67e8f9 6%, var(--surface-soft))
+  );
+}
+
+.ai-interpretation__label {
+  font-size: 0.6875rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  color: var(--muted-foreground);
+  flex-shrink: 0;
+}
+
+.ai-interpretation__text {
+  font-size: 0.8125rem;
+  line-height: 1.4;
+  color: var(--foreground);
+  font-style: italic;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+@media (min-width: 640px) {
+  .ai-interpretation__text {
+    font-size: 0.875rem;
+  }
 }
 
 .ai-block-card {

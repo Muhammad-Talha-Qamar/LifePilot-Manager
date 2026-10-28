@@ -206,6 +206,9 @@ function rewriteQueries(text: string): string {
     /^(?:my )?(?:tasks?|agenda|workload|plate)\b/i.test(text) ||
     /^(?:my\s+)?schedule\??$/i.test(text) ||
     /^(?:show|tell|give)\s+me\b/i.test(text) ||
+    /^(?:show|list|see|view|display)\s+(?:me\s+|my\s+)?(?:upcoming\s+)?(?:tasks?|list|schedule|agenda|day)\b/i.test(
+      text
+    ) ||
     /^(?:pull up|bring up|load|open|see)\s+(?:my\s+)?(?:tasks?|list|schedule|agenda|day)\b/i.test(
       text
     )
@@ -217,6 +220,9 @@ function rewriteQueries(text: string): string {
     if (/\bnext week\b/i.test(text)) return "show my tasks for next week";
     if (/\bthis month\b/i.test(text)) return "show my tasks for this month";
     if (/\bnext month\b/i.test(text)) return "show my tasks for next month";
+    if (/\b(?:next|upcoming)\s+(?:7|seven)\s+days\b/i.test(text) || /\bupcoming\b/i.test(text)) {
+      return "show my tasks for next 7 days";
+    }
     if (/\boverdue\b|\bpast due\b|\blate\b|\bbehind\b/i.test(text)) {
       return "show my overdue tasks";
     }
@@ -225,6 +231,9 @@ function rewriteQueries(text: string): string {
     }
     if (
       /^(?:show|tell|give)\s+me\s+(?:my\s+)?(?:tasks?|list|schedule|agenda)\b/i.test(text) ||
+      /^(?:show|list|see|view|display)\s+(?:me\s+|my\s+)?(?:tasks?|list|schedule|agenda)\b/i.test(
+        text
+      ) ||
       /^(?:pull up|bring up|load|open|see)\s+(?:my\s+)?(?:tasks?|list|schedule|agenda|day)\b/i.test(
         text
       )

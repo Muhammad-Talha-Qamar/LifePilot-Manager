@@ -428,6 +428,8 @@ export function detectPeriodKind(text: string): PeriodKind | null {
   if (/\bnext week\b/.test(n)) return "next_week";
   if (/\bthis week\b/.test(n)) return "this_week";
   if (/\b(next|upcoming)\s+(7|seven)\s+days\b/.test(n)) return "next_7_days";
+  // Bare "upcoming" (show my upcoming tasks) → next 7 days
+  if (/\bupcoming\b/.test(n)) return "next_7_days";
   return null;
 }
 
