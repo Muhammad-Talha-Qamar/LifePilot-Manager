@@ -632,6 +632,9 @@ export function AssistantProvider({ children }: { children: React.ReactNode }) {
             },
             onDone: (data) => {
               sawTerminalEvent = true;
+              // Tools are finished — drop the live ops list so typewriter/stream settle doesn't look stuck.
+              setActivity([]);
+              setStatusLabel(receivedDelta ? null : "Writing…");
               const clearConfirms =
                 options?.clearConfirms === true
                   ? true
