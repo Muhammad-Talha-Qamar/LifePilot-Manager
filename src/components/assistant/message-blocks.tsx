@@ -232,7 +232,7 @@ function TaskList({ title, tasks }: { title: string; tasks: TaskCardData[] }) {
 }
 
 function TaskCard({ task }: { task: TaskCardData }) {
-  const { refreshRecords, busy } = useAssistant();
+  const { refreshRecords } = useAssistant();
   const [open, setOpen] = useState(false);
   const [saving, setSaving] = useState(false);
   const [toggling, setToggling] = useState(false);
@@ -241,7 +241,7 @@ function TaskCard({ task }: { task: TaskCardData }) {
   const [priority, setPriority] = useState(task.priority);
 
   async function toggle(checked: boolean) {
-    if (toggling || busy) return;
+    if (toggling) return;
     setToggling(true);
     try {
       await api(`/api/tasks/${task.id}`, {
@@ -293,7 +293,7 @@ function TaskCard({ task }: { task: TaskCardData }) {
       <div className="flex min-w-0 items-start gap-2.5 sm:gap-3">
         <Checkbox
           checked={task.status === "done"}
-          disabled={toggling || busy}
+          disabled={toggling}
           onCheckedChange={(value) => void toggle(value === true)}
           aria-label={`Mark ${task.title} ${task.status === "done" ? "incomplete" : "complete"}`}
           aria-busy={toggling || undefined}
@@ -393,7 +393,7 @@ function TaskCard({ task }: { task: TaskCardData }) {
 }
 
 function ChecklistCard({ checklist }: { checklist: ChecklistCardData }) {
-  const { refreshRecords, busy } = useAssistant();
+  const { refreshRecords } = useAssistant();
   const [pendingItem, setPendingItem] = useState<string | null>(null);
   const done = checklist.items.filter((item) => item.is_completed).length;
   const percent = checklist.items.length
@@ -401,7 +401,7 @@ function ChecklistCard({ checklist }: { checklist: ChecklistCardData }) {
     : 0;
 
   async function toggle(itemId: string, completed: boolean) {
-    if (pendingItem || busy) return;
+    if (pendingItem) return;
     setPendingItem(itemId);
     try {
       await api(`/api/checklists/${checklist.id}`, {
@@ -448,7 +448,7 @@ function ChecklistCard({ checklist }: { checklist: ChecklistCardData }) {
           >
             <Checkbox
               checked={item.is_completed}
-              disabled={pendingItem === item.id || busy}
+              disabled={pendingItem === item.id}
               onCheckedChange={(value) => void toggle(item.id, value === true)}
               aria-label={`${item.is_completed ? "Reopen" : "Complete"} ${item.title}`}
               aria-busy={pendingItem === item.id || undefined}
