@@ -7,6 +7,7 @@
  * With OPENAI_API_KEY, the model agent still receives a local paraphrase hint.
  */
 
+import { matchConversation } from "./conversation";
 import { interpretUtterance } from "./interpret";
 import { rewriteIntent } from "./intent";
 import { normalizeInput } from "./normalize-input";
@@ -24,21 +25,6 @@ export type Understood =
   | { kind: "command"; text: string }
   | { kind: "reply"; message: string }
   | { kind: "pass" };
-
-const GREETING =
-  /^(?:hey|hi|hello|yo|hiya|howdy|hola|salam|salaam|assalamu? ?alaikum|good\s+(?:morning|afternoon|evening)|sup|what(?:'s| is|s) up|heya)(?:\s*[!?.]*)?$/i;
-
-const THANKS =
-  /^(?:thanks|thank you|thx|ty|appreciate it|cheers|shukriya|shukria|merci|gracias)(?:\s*[!?.]*)?$/i;
-
-const HOW_ARE_YOU =
-  /^(?:how are you(?: doing)?|how(?:'s| is|s) it going|how r u|you good|kya haal hai)(?:\s*[!?.]*)?$/i;
-
-const HELP =
-  /^(?:help(?: me)?|what can you do|what do you do|how (?:do|can) (?:i|you) (?:use|work)|capabilities|commands?|examples?)(?:\s*[!?.]*)?$/i;
-
-const WHO =
-  /^(?:who are you|what are you|your name|introduce yourself)(?:\s*[!?.]*)?$/i;
 
 function softCreate(text: string): string | null {
   // Soft obligation / planning talk that still means "save a task".
@@ -275,35 +261,6 @@ function softEvent(text: string): string | null {
   return null;
 }
 
-function conversationalReply(text: string): string | null {
-  if (GREETING.test(text)) {
-    return "Hey — I'm here. Tell me what you want to get done, check, or plan, in whatever words feel natural.";
-  }
-  if (HOW_ARE_YOU.test(text)) {
-    return "Doing well, thanks. Want me to check today's list, add something, or plan your day?";
-  }
-  if (THANKS.test(text)) {
-    return "Anytime. Say the word if you need another change.";
-  }
-  if (WHO.test(text)) {
-    return "I'm LifePilot — your productivity teammate. I keep your tasks, checklists, and calendar in sync when you ask in plain language.";
-  }
-  if (HELP.test(text)) {
-    return [
-      "Talk to me like a friend who helps you stay organized. For example:",
-      "• “Remind me to call mom tomorrow”",
-      "• “Done with the essay”",
-      "• “What's left today?”",
-      "• “Make a groceries list with milk and eggs”",
-      "• “Plan my day”",
-      "• “Move maths homework to Friday”",
-      "• “Shopping list: milk, eggs, bread”",
-      "Typos, slang, mixed languages, and incomplete sentences are fine — I'll figure out what you mean when I can.",
-    ].join("\n");
-  }
-  return null;
-}
-
 /**
  * Understand everyday user text before the local command matcher runs.
  */
@@ -311,8 +268,8 @@ export function understandInput(raw: string): Understood {
   const text = normalizeInput(raw).replace(/[.!?…]+$/g, "").trim();
   if (!text) return { kind: "pass" };
 
-  const chat = conversationalReply(text);
-  if (chat) return { kind: "reply", message: chat };
+  const chat = matchConversation(raw);
+  if (chat) return { kind: "reply", message: chat.message };
 
   const stance = detectStance(raw);
 
@@ -320,7 +277,7 @@ export function understandInput(raw: string): Understood {
     return {
       kind: "reply",
       message:
-        "Got it — I won't add that. If you meant something else (like a reminder), say it another way.",
+        "Understood — I won't add that. If you meant a different change, tell me in your own words.",
     };
   }
 
@@ -328,7 +285,7 @@ export function understandInput(raw: string): Understood {
     return {
       kind: "reply",
       message:
-        "That sounds like an if/then plan. Tell me the action you want right now (for example: “move science to Friday”), and I’ll do that part.",
+        "That sounds like an if/then plan. Which part should I do right now?",
     };
   }
 
@@ -338,6 +295,11 @@ export function understandInput(raw: string): Understood {
       message:
         "Sounds like you're still deciding. Want me to save that as a task, or leave it for now?",
     };
+  }
+
+  if (stance.kind === "smalltalk") {
+    const again = matchConversation(raw);
+    if (again) return { kind: "reply", message: again.message };
   }
 
   if (stance.kind === "complete_focus") {
@@ -373,14 +335,14 @@ export function understandInput(raw: string): Understood {
     return {
       kind: "reply",
       message:
-        "Got it — I won't add that. If you meant something else (like a reminder), say it another way.",
+        "Understood — I won't add that. If you meant a different change, tell me in your own words.",
     };
   }
   if (/^__clarify_conditional__/i.test(rewrittenNorm)) {
     return {
       kind: "reply",
       message:
-        "That sounds like an if/then plan. Tell me the action you want right now (for example: “move science to Friday”), and I’ll do that part.",
+        "That sounds like an if/then plan. Which part should I do right now?",
     };
   }
   if (/^__clarify_suggestion__/i.test(rewrittenNorm)) {

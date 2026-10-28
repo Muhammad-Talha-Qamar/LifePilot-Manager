@@ -132,6 +132,17 @@ export function suggestFollowUps(input: {
 }): string[] {
   const tools = new Set(input.toolNames);
   const tips: string[] = [];
+  const user = input.userMessage.trim();
+
+  // Skip chip spam after pure conversation (greetings, thanks, casual chat).
+  if (
+    tools.size === 0 &&
+    /^(?:hey|hi|hello|yo|thanks|thank you|thx|ty|cool|nice|great|got it|how are you|who are you|what can you do|help)\b/i.test(
+      user
+    )
+  ) {
+    return [];
+  }
 
   if (input.agentMode === "plan") {
     tips.push("Execute this plan");
@@ -146,7 +157,11 @@ export function suggestFollowUps(input: {
     return tips.slice(0, 3);
   }
 
-  if (tools.has("create_task") || tools.has("create_checklist")) {
+  if (tools.has("create_project")) {
+    tips.push("Add tasks to that project");
+    tips.push("Break this into smaller steps");
+    tips.push("What's left today?");
+  } else if (tools.has("create_task") || tools.has("create_checklist")) {
     tips.push("Add another related task");
     tips.push("Make that urgent");
     tips.push("What's left today?");
@@ -154,21 +169,25 @@ export function suggestFollowUps(input: {
     tips.push("What's still left today?");
     tips.push("Plan the rest of my day");
     tips.push("Undo that");
+  } else if (
+    tools.has("propose_daily_plan") ||
+    /\b(break|smaller steps|large project)\b/i.test(input.assistantMessage)
+  ) {
+    tips.push("Save this plan");
+    tips.push("Make the plan shorter");
+    tips.push("What should I work on first?");
   } else if (tools.has("query_schedule")) {
     tips.push("Plan my day");
     tips.push("What should I work on first?");
-    tips.push("What's coming up?");
     tips.push("Show overdue");
-    tips.push("Remind me to review this tomorrow");
   } else if (tools.has("undo_last_change")) {
     tips.push("What's left today?");
-    tips.push("Redo that change");
+  } else if (tools.size === 0) {
+    // Conversational / clarifying turn — at most a light optional tip.
+    return [];
   } else {
     tips.push("What's left today?");
-    tips.push("Plan my day");
     tips.push("What should I work on first?");
-    tips.push("What's coming up?");
-    tips.push("/plan organize my week");
   }
 
   return tips.slice(0, 3);

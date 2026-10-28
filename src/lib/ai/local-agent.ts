@@ -1360,9 +1360,23 @@ export async function runLocalCommand(
     };
   }
 
+  // Honest, natural fallback — adapt to question-like vs action-like phrasing.
+  const looksLikeQuestion =
+    /\?$/.test(raw.trim()) ||
+    /^(?:what|why|how|who|when|where|which|do|does|did|is|are|can|could|would|should)\b/i.test(
+      norm
+    );
+  if (looksLikeQuestion) {
+    return {
+      message:
+        "I'm not sure I followed that. I can look up your tasks, explain how LifePilot works, or make a change if you tell me what you need — for example “what's left today?” or “how do projects work?”",
+      blocks: [],
+      context,
+    };
+  }
   return {
     message:
-      "I want to help, but I'm not sure what you meant. Try saying it the way you'd tell a friend — for example “remind me to call mom tomorrow,” “the essay is done,” “what's left today?,” or “shopping list: milk, eggs, bread.” Nothing was changed.",
+      "I want to help, but I'm not sure what you meant. You can say it casually — for example “remind me to call mom tomorrow,” “the essay is done,” or “what's left today?” Nothing was changed.",
     blocks: [],
     context,
   };

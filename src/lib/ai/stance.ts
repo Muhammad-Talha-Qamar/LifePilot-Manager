@@ -118,6 +118,25 @@ export function detectStance(raw: string): Stance {
     };
   }
 
+  // Small talk before broad query cues ("how are you" starts with "how").
+  if (
+    /^(?:hey|hi|hello|yo|hiya|howdy|hola|salam|salaam|thanks|thank you|thx|ty|cheers|good\s+(?:morning|afternoon|evening)|sup|what(?:'s| is|s) up)\b/i.test(
+      normalized
+    ) ||
+    /^(?:how are you|how(?:'s| is|s) it going|how r u|you good|kya haal hai)\b/i.test(normalized) ||
+    /^(?:who are you|what are you|your name|help(?: me)?|what can you do)\b/i.test(normalized) ||
+    /^(?:cool|nice|great|awesome|perfect|got it|makes sense|lol|haha|hmm+)\b/i.test(normalized)
+  ) {
+    // "help me plan …" / "hey remind me …" are commands, not small talk.
+    if (
+      !/\b(?:remind|add|create|delete|complete|finish|schedule|move|show|list|plan|mark|undo|checklist|todo)\b/i.test(
+        normalized
+      )
+    ) {
+      return { kind: "smalltalk", reason: "greeting / thanks / casual", confidence: 0.85 };
+    }
+  }
+
   // Broken / informal schedule questions: "what task i have tomorrow"
   if (
     hasQuestionMark ||
@@ -174,14 +193,6 @@ export function detectStance(raw: string): Stance {
   }
 
   if (
-    /^(?:hey|hi|hello|yo|thanks|thank you|thx|help|who are you|how are you)\b/i.test(
-      normalized
-    )
-  ) {
-    return { kind: "smalltalk", reason: "greeting/help", confidence: 0.7 };
-  }
-
-  if (
     /^(?:add|create|put|remind|schedule|move|delete|show|list|plan|undo|mark|set)\b/i.test(
       normalized
     ) ||
@@ -203,6 +214,7 @@ export function blocksCreateRewrite(stance: Stance): boolean {
     stance.kind === "lookup_past" ||
     stance.kind === "conditional" ||
     stance.kind === "suggestion" ||
+    stance.kind === "smalltalk" ||
     (stance.kind === "complete_focus" && stance.confidence >= 0.8)
   );
 }

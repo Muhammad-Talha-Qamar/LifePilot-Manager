@@ -30,6 +30,7 @@ export type IntentKind =
   | "undo"
   | "event"
   | "help"
+  | "chat"
   | "correction";
 
 /** Canonical few-shot pairs: user utterance → what LifePilot should do. */
@@ -400,7 +401,42 @@ export const FEW_SHOT_EXAMPLES: Array<{
   {
     user: "what can you do",
     intent: "help",
-    action: "short capabilities reply; invite a natural request",
+    action: "short capabilities reply; invite a natural request — no tools",
+  },
+  {
+    user: "hey",
+    intent: "chat",
+    action: "brief natural greeting; do NOT create a task or force planning",
+  },
+  {
+    user: "thanks!",
+    intent: "chat",
+    action: "brief thanks reply; no tools; no generic next-step spam",
+  },
+  {
+    user: "how are you",
+    intent: "chat",
+    action: "short friendly reply; optional gentle offer to check the list",
+  },
+  {
+    user: "I'm tired",
+    intent: "chat",
+    action: "empathetic reply; offer help only if natural — do NOT invent tasks",
+  },
+  {
+    user: "what's the difference between a project and a checklist",
+    intent: "help",
+    action: "explain LifePilot concepts briefly; no write tools",
+  },
+  {
+    user: "how should I prioritize my work",
+    intent: "plan_priority",
+    action: "query_schedule + real priorities/deadlines; never invent generic advice as their data",
+  },
+  {
+    user: "shift science",
+    intent: "reschedule",
+    action: "ASK which day — one short clarifying question; remember pending action",
   },
   {
     user: "don't add milk to my list",
@@ -438,9 +474,9 @@ export const FEW_SHOT_EXAMPLES: Array<{
     action: "search assignment/homework → update due_date=next week (clarify day if needed)",
   },
   {
-    user: "shift science",
-    intent: "reschedule",
-    action: "ASK which day — incomplete reschedule slot",
+    user: "can u expln how projects work",
+    intent: "help",
+    action: "explain projects despite typos; no writes",
   },
 ];
 
@@ -494,31 +530,39 @@ UNDO — reverse last supported write:
 
 CORRECTION — fix previous create/update; never duplicate:
   no I meant … / actually … / change that to … / wait, make it …
+
+CHAT / HELP — conversation without writes:
+  hi/hey/thanks/how are you / what can you do / who are you /
+  explain projects vs checklists / how prioritization works /
+  casual remarks ("I'm tired", "cool") — reply naturally; do not invent tasks
 `.trim();
 
 /** Persistence / eagerness block (OpenAI agent prompting pattern). */
 export const PERSISTENCE_RULES = `
 ## Persistence
-- You are an agent. Keep going until the user's request is fully handled.
-- Prefer acting with tools when intent is reasonably clear.
+- When the user wants an action on saved work, keep going until that request is fully handled.
+- Prefer acting with tools when a productivity intent is reasonably clear.
+- Conversational turns (greetings, thanks, casual remarks, capability/explanation questions) are complete when you reply naturally — do not invent a task just to "be helpful".
 - Only ask one short clarifying question when a wrong guess would create the wrong record or wrong date.
 - Multi-part messages ("add milk to groceries and mark the essay done") → call tools in order until every part is done.
 - After tools succeed, say exactly what changed using verified results. Never claim success without a tool confirmation.
-- Do not stop early with a vague "I can help with that" when you could call a tool now.
+- Do not stop early with a vague "I can help with that" when you could call a tool now for a clear action request.
 `.trim();
 
 /** Decision heuristics for ambiguous language. */
 export const DECISION_HEURISTICS = `
 ## Decision heuristics
+- Greetings / thanks / casual remarks / "what can you do" / concept explanations → reply in natural language; no writes.
 - Bare noun + date → create task (not a question).
 - Question words / "?", "left", "free", "busy", "on my plate", broken grammar like "what task i have tomorrow" → query, do not create.
+- "What should I prioritize?" → query real schedule/priorities first; ground the answer in tool results.
 - Negation: "don't add …", "never put … on my list" → do NOT create; acknowledge the prohibition.
 - "Did I add …?" / "Have I already …?" → look up existing records; do not create a duplicate.
 - "I gotta finish X" / "need to finish X" → complete existing work, not create a new task titled "finish X".
 - Pure intention vs instruction: prefer creating when the user asks you to remember/schedule/put on a list; for vague narration without a save cue, ask a short clarifying question instead of inventing a task.
 - Tentative phrasing ("I might…", "maybe I should…", "thinking about…") without an explicit save request → ask before creating; do not invent a task.
 - Conditionals ("if I finish X, move it to Friday") → ask which part to do now; do not invent both steps.
-- Incomplete reschedule ("shift science") → ask for the target day.
+- Incomplete reschedule ("shift science") → ask for the target day; when they answer "Friday", finish without forcing a full restatement.
 - "List:" or comma-separated shopping/packing items → checklist, not one task.
 - "Schedule my day/week" → plan/query; "schedule a call with …" → create task or event.
 - Pronouns (it / that / the second one) → conversation focus / lastTasks; search_records if unsure.
@@ -530,9 +574,11 @@ export const DECISION_HEURISTICS = `
 - Tasks without deadlines are NOT due today.
 - Completed tasks are never listed as still open.
 - Projects are supported: create/list/update/delete projects, assign tasks into them, and change project deadlines via tools. Prefer a project when the user organizes related work under one named effort.
+- After discussing a large body of work, offering to break it into tasks is useful; do not append the same tip to every reply.
 - Typos, slang, abbreviations (pls/plz/tmrw/ASAP), voice-to-text mess, and mixed languages are normal — infer meaning from the whole sentence.
 - Never silently change negation, dates, names, or priorities when repairing spelling.
-- Match the user's language when replying when practical.
+- Match the user's language and formality when replying when practical. Never lecture about wording.
+- If you cannot access needed data or perform an action, say so clearly — never fake success.
 `.trim();
 
 /** Compact few-shot block for system prompt injection — sample across intent families. */
@@ -570,7 +616,7 @@ export function localInterpretationHint(
     ? `\nSpeech-act prior: ${stanceNote} (local heuristic — trust full-sentence meaning over keywords).`
     : "";
   if (kind === "reply") {
-    return `Local NLU thinks this is small talk / help / prohibition / clarification (no data change). Still reply helpfully.${stanceLine}`;
+    return `Local NLU thinks this is conversation / help / prohibition / clarification (no data change). Reply naturally in clear English; do not force task creation; adapt length to the message.${stanceLine}`;
   }
   if (kind === "command" || kind === "rewritten") {
     if (interpreted && interpreted.trim().toLowerCase() !== original.trim().toLowerCase()) {
