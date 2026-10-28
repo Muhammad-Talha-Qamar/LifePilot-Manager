@@ -5,6 +5,11 @@
 
 import { primaryClause } from "./interpret";
 import { normalizeInput } from "./normalize-input";
+import {
+  blocksCreateRewrite,
+  detectStance,
+  extractFinishSubject,
+} from "./stance";
 
 const DATE_TAIL =
   /(?:today|tonight|tomorrow|yesterday|this\s+\w+|next\s+\w+|(?:mon|tues|wednes|thurs|fri|satur|sun)day|\d{4}-\d{2}-\d{2}|(?:\d{1,2}\s+)?(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:t(?:ember)?)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)(?:\s+\d{1,2}(?:,?\s*\d{4})?)?)/i;
@@ -46,7 +51,7 @@ function tidyCreatePayload(payload: string): string {
 function rewriteCreates(text: string): string {
   // "remind me to buy milk tomorrow" / "don't forget to …"
   const remind = text.match(
-    /^(?:remind me(?: to)?|don'?t forget(?: to)?|do not forget(?: to)?|remember(?: to)?|note(?: to)?|ping me(?: to)?|nudge me(?: to)?|hit me(?: up)?(?: to)?|send me a reminder(?: to)?|set a reminder(?: to)?|make a note(?: to)?)\s+(.+)$/i
+    /^(?:remind me(?: to)?|don'?t forget(?: to)?|do not forget(?: to)?|remember(?: to)?|note(?:\s+of|\s+to)?|ping me(?: to)?|nudge me(?: to)?|hit me(?: up)?(?: to)?|send me a reminder(?: to)?|set a reminder(?: to)?|make a note(?:\s+of|\s+to)?)\s+(.+)$/i
   );
   if (remind) return `add ${tidyCreatePayload(remind[1])}`;
 
@@ -74,9 +79,18 @@ function rewriteCreates(text: string): string {
   const better = text.match(/^(?:better|best)\s+(?:to\s+)?(?:add|put|do)\s+(.+)$/i);
   if (better) return `add ${tidyCreatePayload(better[1])}`;
 
+  // "put this down for tomorrow"
+  const putDown = text.match(
+    /^(?:put|write|note)\s+(.+?)\s+down(?:\s+(?:for|on)\s+(.+))?$/i
+  );
+  if (putDown) {
+    const title = tidyCreatePayload(putDown[1]);
+    return putDown[2] ? `add ${title} for ${putDown[2]}` : `add ${title}`;
+  }
+
   // "put X on my list/todo" / "add X to my list"
   const putOnList = text.match(
-    /^(?:put|add|stick|throw|drop|shove)\s+(.+?)\s+(?:on|to|onto|in)\s+(?:my\s+)?(?:list|todo|to-?do|tasks?|reminders?)(?:\s+for\s+(.+))?$/i
+    /^(?:put|add|stick|throw|drop|shove)\s+(.+?)\s+(?:on|to|onto|in)\s+(?:my\s+)?(?:list|todo|to-?do|tasks?|reminders?|workload|schedule|agenda)(?:\s+for\s+(.+))?$/i
   );
   if (putOnList) {
     const title = tidyCreatePayload(putOnList[1]);
@@ -124,6 +138,15 @@ function rewriteCreates(text: string): string {
   const book = text.match(/^(?:book|block)\s+(?:time\s+)?(?:for\s+)?(.+)$/i);
   if (book && !/\b(?:day|week|month)\b/i.test(book[1])) {
     return `add ${tidyCreatePayload(book[1])}`;
+  }
+
+  // "include X in my schedule/workload"
+  const include = text.match(
+    /^(?:include)\s+(.+?)\s+(?:in|on|to)\s+(?:my\s+)?(?:schedule|workload|agenda|list|tasks?)(?:\s+for\s+(.+))?$/i
+  );
+  if (include) {
+    const title = tidyCreatePayload(include[1]);
+    return include[2] ? `add ${title} for ${include[2]}` : `add ${title}`;
   }
 
   return text;
@@ -195,6 +218,43 @@ function rewriteQueries(text: string): string {
     )
   ) {
     return text;
+  }
+
+  // Broken grammar: "what task i have tomorrow" / "what tasks i got today"
+  // Do NOT match "what do I need to finish …" (handled by the general query block).
+  const brokenHave = text.match(
+    /^(?:what|whats|what is|which)\s+(?:tasks?|work|stuff|things?)\s+(?:do\s+)?i\s+(?:have|got|need)(?:\s+to\s+do)?(?:\s+(?:for|on))?\s*(.+)?$/i
+  ) || text.match(
+    /^(?:what|whats|what is|which)\s+(?:do\s+)?i\s+(?:have|got)(?:\s+(?:for|on))?\s*(.+)?$/i
+  );
+  if (brokenHave) {
+    const when = (brokenHave[1] ?? "").trim();
+    if (/\btomorrow\b/i.test(text) || /\btomorrow\b/i.test(when)) {
+      return "show my tasks for tomorrow";
+    }
+    if (/\btoday\b|\btonight\b/i.test(text) || /\btoday\b|\btonight\b/i.test(when)) {
+      return "show my tasks for today";
+    }
+    if (/\bthis week\b/i.test(text)) return "show my tasks for this week";
+    if (/\bnext week\b/i.test(text)) return "show my tasks for next week";
+    if (/\bthis month\b/i.test(text)) return "show my tasks for this month";
+    if (/\bnext month\b/i.test(text)) return "show my tasks for next month";
+    if (when && /^(?:today|tonight|tomorrow|yesterday|this\s+\w+|next\s+\w+)$/i.test(when)) {
+      return `show my tasks for ${when}`;
+    }
+    return "show my tasks for today";
+  }
+
+  // "i have a lot of work tomorrow" / "hav alot of work tomorow" → schedule glance
+  if (
+    /^(?:i\s+)?(?:hav(?:e)?|got)\s+(?:a\s+lot|alot|lots|much|many|too much)\s+(?:of\s+)?(?:work|tasks?|stuff|things?)(?:\s+(?:for|on))?\s*(.+)?$/i.test(
+      text
+    )
+  ) {
+    if (/\btomorrow\b/i.test(text)) return "show my tasks for tomorrow";
+    if (/\btoday\b|\btonight\b/i.test(text)) return "show my tasks for today";
+    if (/\bthis week\b/i.test(text)) return "show my tasks for this week";
+    return "show my tasks for today";
   }
 
   // "do i have anything today" / "anything for tomorrow" / "what's on today"
@@ -395,15 +455,56 @@ export function rewriteIntent(input: string): string {
   }
   if (!text) return text;
 
+  const stance = detectStance(text);
   text = stripPolite(text);
+
+  // Prohibitions must never become creates ("don't add milk").
+  if (stance.kind === "prohibit") {
+    return stripTrailingPunct(`__prohibit__ ${text}`);
+  }
+
+  // Conditionals need clarification — do not invent a write.
+  if (stance.kind === "conditional") {
+    return stripTrailingPunct(`__clarify_conditional__ ${text}`);
+  }
+
+  // Past lookups ("Did I add milk?") → search-style query, not create.
+  if (stance.kind === "lookup_past") {
+    const about = text
+      .replace(
+        /^(?:did i|have i|did we)\s+(?:already\s+)?(?:add|create|put|schedule|include)\s+/i,
+        ""
+      )
+      .replace(/\s+(?:to|on|in)\s+(?:my\s+)?(?:list|tasks?|todo|schedule).*$/i, "")
+      .replace(/\?+$/g, "")
+      .trim();
+    if (about) return `show my tasks about ${about}`;
+    return "show my tasks for today";
+  }
+
+  // "I gotta finish X" → complete, not create "finish X".
+  if (stance.kind === "complete_focus") {
+    const subject = extractFinishSubject(text);
+    if (subject) {
+      return `mark ${subject} complete`;
+    }
+  }
+
   text = rewriteUndo(text);
   text = rewriteQueries(text);
   text = rewriteDeletes(text);
   text = rewriteCompletes(text);
   text = rewriteMoves(text);
   text = rewritePriority(text);
-  text = rewriteCreates(text);
-  text = rewriteBareTask(text);
+
+  // Skip create / bare-task when stance says this is not a create request.
+  if (!blocksCreateRewrite(stance)) {
+    text = rewriteCreates(text);
+    text = rewriteBareTask(text);
+  } else if (stance.kind === "query") {
+    // Ensure query rewrite still wins if earlier passes left text unchanged.
+    text = rewriteQueries(text);
+  }
 
   return stripTrailingPunct(text.replace(/\s+/g, " ").trim());
 }

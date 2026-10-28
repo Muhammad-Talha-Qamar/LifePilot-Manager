@@ -43,6 +43,7 @@ import type {
   ScheduleQueryResult,
 } from "./types";
 import { emptyContext } from "./types";
+import { detectStance } from "./stance";
 import { understandInput } from "./understand";
 import { applyUndoEntry, snapshotForUndo, undoEntryFor } from "./undo";
 import { friendlyFailure, humanizeError } from "./user-messages";
@@ -115,13 +116,22 @@ function buildSystemPrompt(
   return `You are LifePilot — a warm, capable productivity friend (think Cursor agent / ChatGPT, but focused on getting real work organized).
 
 ## Background
-You understand any natural language: slang, typos, broken grammar, incomplete sentences, voice-to-text messiness, emoji shorthand, romanized Urdu/Hindi, Spanish helpers, and indirect phrasing. You do not wait for fixed command templates. Infer intent, then act with tools.
+You understand ordinary human English as flexibly as possible — not a fixed command language. Use the model's full language understanding: synonyms, idioms, phrasal verbs, slang, contractions, abbreviations (pls/plz/tmrw/ASAP/FYI/BTW), typos, missing punctuation, and imperfect grammar. Infer meaning from the whole sentence and conversation, then act with tools. Never require the user to memorize templates or rewrite into perfect English.
+
+## Speech acts (critical)
+- Questions and lookups ("Did I add milk?", "what task i have tomorrow") → search/query tools. Do NOT create.
+- Prohibitions ("Don't add milk to my list") → do nothing that adds a task; acknowledge.
+- Suggestions / vague narration without a save request → ask briefly if they want it saved, rather than inventing a task.
+- Clear remember/schedule/put-on-list requests → create.
+- "I gotta finish X" usually means complete existing work, not create a task titled "finish X".
+- Conditionals ("if I finish X, move it…") → clarify which step to do now.
+- Negation, dates, names, numbers, and priorities must never be silently flipped by spelling repair.
 
 ## Spelling and grammar
-- Mentally correct obvious typos before deciding the action ("tommorow"→tomorrow, "remnd me"→remind me, "cheklist"→checklist, "waht left"→what's left, "homwork"→homework, "by milk"→buy milk, "upcomming"→upcoming, "reshedule"→reschedule).
-- Broken grammar is fine: missing articles, wrong tense, word salad, doubled words, missing spaces ("remindme", "showme today").
+- Mentally correct obvious typos from full-sentence context ("tommorow"→tomorrow, "remnd me"→remind me, "cheklist"→checklist, "waht left"→what's left, "homwork"→homework, "by milk"→buy milk, "upcomming"→upcoming, "reshedule"→reschedule, "assigment"→assignment/homework, "alot"→a lot).
+- Broken grammar is fine: missing auxiliaries ("what task i have tomorrow"), wrong tense, missing articles, fragments, missing apostrophes.
 - Never refuse or lecture about spelling. Act on the intended meaning.
-- The local interpretation hint (if present) already applies fuzzy spelling repair — use it as a strong prior, then verify with tools.
+- The local interpretation hint (if present) is a soft prior only — it can be wrong about speech acts. Prefer full-sentence meaning and tools over the hint when they conflict.
 - The UI may already show a subtle "I think you mean …" chip. Do NOT repeat that phrase in your reply. Just confirm the action result (e.g. "Added Homework for tomorrow.").
 - If a date phrase is genuinely ambiguous (e.g. "next weak" could be week), ask a short yes/no question instead of guessing. Do not run destructive tools until clarified.
 
@@ -174,19 +184,24 @@ ${PERSISTENCE_RULES}
 }
 
 function buildNluHint(userMessage: string): string {
+  const stance = detectStance(userMessage);
+  const stanceNote =
+    stance.kind !== "unknown" && stance.kind !== "command"
+      ? `${stance.kind}: ${stance.reason}`
+      : null;
   const understood = understandInput(userMessage);
   if (understood.kind === "reply") {
-    return localInterpretationHint(userMessage, null, "reply");
+    return localInterpretationHint(userMessage, null, "reply", stanceNote);
   }
   if (understood.kind === "command") {
     // Soft prior only — the model must still verify with tools.
-    return localInterpretationHint(userMessage, understood.text, "command");
+    return localInterpretationHint(userMessage, understood.text, "command", stanceNote);
   }
   const rewritten = rewriteIntent(userMessage);
   if (rewritten.trim().toLowerCase() !== userMessage.trim().toLowerCase()) {
-    return localInterpretationHint(userMessage, rewritten, "rewritten");
+    return localInterpretationHint(userMessage, rewritten, "rewritten", stanceNote);
   }
-  return localInterpretationHint(userMessage, null, "pass");
+  return localInterpretationHint(userMessage, null, "pass", stanceNote);
 }
 
 async function loadBoard(auth: AuthContext): Promise<Board> {

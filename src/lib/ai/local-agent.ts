@@ -839,6 +839,75 @@ export async function runLocalCommand(
   const moveOne = norm.match(/^(?:move|reschedule|shift) (.+?) to (.+)/);
   if (moveOne) return reschedule(moveOne[1], moveOne[2], workingRaw, context, board, act);
 
+  // Incomplete reschedule: "shift science" / "postpone homework" — ask for the date.
+  const moveIncomplete = norm.match(
+    /^(?:move|reschedule|shift|postpone|bump|push(?: back)?|delay|defer|slide)\s+(.+)$/
+  );
+  if (moveIncomplete && !/\b(?:to|until|till|for)\b/.test(norm)) {
+    const subject = cleanPhrase(moveIncomplete[1]);
+    const found = resolveTaskPhrase(subject, board, context);
+    if ("ask" in found) return { message: found.ask, blocks: [], context };
+    if ("none" in found) {
+      return {
+        message: `I couldn't find “${subject}” to reschedule. Which task, and to which day?`,
+        blocks: [],
+        context,
+      };
+    }
+    rememberTask(context, found.tasks[0]);
+    return {
+      message: `Move “${found.tasks[0].title}” to which day? (for example: Friday, tomorrow, next week)`,
+      blocks: [
+        {
+          type: "tasks",
+          title: "Task to reschedule",
+          tasks: [toTaskCard(found.tasks[0], board.projects, board.timezone)],
+        },
+      ],
+      context,
+    };
+  }
+
+  // "show my tasks about milk" / past-lookup rewrite
+  const aboutMatch = norm.match(
+    /^(?:show|list|see|find|search)\s+(?:my\s+)?tasks?\s+(?:about|named|called|for|with)\s+(.+)$/
+  );
+  if (aboutMatch) {
+    const phrase = cleanPhrase(aboutMatch[1]);
+    const hits = tasksAbout(phrase, board.tasks.filter((t) => t.status !== "done"));
+    const alsoDone = hits.length
+      ? hits
+      : tasksAbout(phrase, board.tasks);
+    if (!alsoDone.length) {
+      return {
+        message: `I don't see a task about “${phrase}” on your list.`,
+        blocks: [],
+        context,
+      };
+    }
+    context.lastTasks = alsoDone.slice(0, 20).map((task) => ({
+      id: task.id,
+      title: task.title,
+    }));
+    if (alsoDone.length === 1) rememberTask(context, alsoDone[0]);
+    return {
+      message:
+        alsoDone.length === 1
+          ? `Yes — “${alsoDone[0].title}” is on your list${alsoDone[0].due_date ? ` (due ${formatDateOnly(alsoDone[0].due_date)})` : ""}${alsoDone[0].status === "done" ? ", and it's already done" : ""}.`
+          : `I found ${alsoDone.length} tasks about “${phrase}”: ${alsoDone.map((t) => t.title).join(", ")}.`,
+      blocks: [
+        {
+          type: "tasks",
+          title: "Matching tasks",
+          tasks: alsoDone.slice(0, 12).map((task) =>
+            toTaskCard(task, board.projects, board.timezone)
+          ),
+        },
+      ],
+      context,
+    };
+  }
+
   if (
     /^(?:mark|complete|finish|check off)\b/.test(norm) &&
     (/checklist|items?\b/.test(norm) || selectionCount(norm))

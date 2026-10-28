@@ -10,6 +10,11 @@
 import { interpretUtterance } from "./interpret";
 import { rewriteIntent } from "./intent";
 import { normalizeInput } from "./normalize-input";
+import {
+  blocksCreateRewrite,
+  detectStance,
+  extractFinishSubject,
+} from "./stance";
 
 export type Understood =
   | { kind: "command"; text: string }
@@ -57,15 +62,38 @@ function softCreate(text: string): string | null {
   );
   if (probably) return `add ${probably[1]}`;
 
-  // "make sure I …"
+  // "make sure I don't forget to …" / "make sure I …"
+  const makeSureForget = text.match(
+    /^(?:make sure(?: that)? i|ensure i)\s+don'?t\s+forget(?:\s+to)?\s+(.+)$/i
+  );
+  if (makeSureForget) return `add ${makeSureForget[1]}`;
+
   const makeSure = text.match(/^(?:make sure(?: that)? i|ensure i)\s+(.+)$/i);
-  if (makeSure) return `add ${makeSure[1]}`;
+  if (makeSure && !/\bdon'?t\s+add\b/i.test(makeSure[1])) {
+    return `add ${makeSure[1]}`;
+  }
 
   // "don't let me forget …"
   const dontForget = text.match(
     /^(?:don'?t let me forget(?: to)?|never let me forget(?: to)?)\s+(.+)$/i
   );
   if (dontForget) return `add ${dontForget[1]}`;
+
+  // "put this down for tomorrow" / "put X down"
+  const putDown = text.match(
+    /^(?:can you|could you|would you|will you)?\s*(?:please\s+)?(?:put|write|note)\s+(.+?)\s+down(?:\s+(?:for|on)\s+(.+))?$/i
+  );
+  if (putDown) {
+    return putDown[2] ? `add ${putDown[1]} for ${putDown[2]}` : `add ${putDown[1]}`;
+  }
+
+  // "include X in my schedule/workload"
+  const include = text.match(
+    /^(?:include|add)\s+(.+?)\s+(?:in|on|to)\s+(?:my\s+)?(?:schedule|workload|agenda|list|tasks?)(?:\s+for\s+(.+))?$/i
+  );
+  if (include) {
+    return include[2] ? `add ${include[1]} for ${include[2]}` : `add ${include[1]}`;
+  }
 
   return null;
 }
@@ -114,6 +142,8 @@ function softQuery(text: string): string | null {
     if (/\btomorrow\b/i.test(text)) return "show my tasks for tomorrow";
     if (/\bthis week\b/i.test(text)) return "show my tasks for this week";
     if (/\bnext week\b/i.test(text)) return "show my tasks for next week";
+    if (/\bthis month\b/i.test(text)) return "show my tasks for this month";
+    if (/\bnext month\b/i.test(text)) return "show my tasks for next month";
     if (/\boverdue\b/i.test(text)) return "show my overdue tasks";
     return "show my tasks for today";
   }
@@ -293,7 +323,38 @@ export function understandInput(raw: string): Understood {
   const chat = conversationalReply(text);
   if (chat) return { kind: "reply", message: chat };
 
+  const stance = detectStance(raw);
+
+  if (stance.kind === "prohibit") {
+    return {
+      kind: "reply",
+      message:
+        "Got it — I won't add that. If you meant something else (like a reminder), say it another way.",
+    };
+  }
+
+  if (stance.kind === "conditional") {
+    return {
+      kind: "reply",
+      message:
+        "That sounds like an if/then plan. Tell me the action you want right now (for example: “move science to Friday”), and I’ll do that part.",
+    };
+  }
+
+  if (stance.kind === "complete_focus") {
+    const subject = extractFinishSubject(text);
+    if (subject) {
+      return { kind: "command", text: `mark ${subject} complete` };
+    }
+  }
+
+  if (stance.kind === "lookup_past") {
+    const rewrittenLookup = rewriteIntent(text);
+    return { kind: "command", text: rewrittenLookup };
+  }
+
   // Soft transforms that go beyond rewriteIntent.
+  // Skip softCreate when stance says this is not a create request.
   const soft =
     softPlan(text) ||
     softChecklist(text) ||
@@ -301,12 +362,28 @@ export function understandInput(raw: string): Understood {
     softComplete(text) ||
     softReschedule(text) ||
     softEvent(text) ||
-    softCreate(text);
+    (blocksCreateRewrite(stance) ? null : softCreate(text));
 
   const candidate = soft ?? text;
   const rewritten = rewriteIntent(candidate);
   const rewrittenNorm = rewritten.trim().toLowerCase();
   const textNorm = text.trim().toLowerCase();
+
+  // Internal markers from rewriteIntent → friendly handling
+  if (/^__prohibit__/i.test(rewrittenNorm)) {
+    return {
+      kind: "reply",
+      message:
+        "Got it — I won't add that. If you meant something else (like a reminder), say it another way.",
+    };
+  }
+  if (/^__clarify_conditional__/i.test(rewrittenNorm)) {
+    return {
+      kind: "reply",
+      message:
+        "That sounds like an if/then plan. Tell me the action you want right now (for example: “move science to Friday”), and I’ll do that part.",
+    };
+  }
 
   if (rewrittenNorm !== textNorm || soft) {
     return { kind: "command", text: rewritten };
@@ -324,11 +401,13 @@ export function understandInput(raw: string): Understood {
   }
 
   // Phrasebook similarity + slot extraction when regex soft/rewrite miss.
+  // Never let phrasebook create against a blocking stance.
   const interpreted = interpretUtterance(raw);
   if (
     interpreted.canonical &&
     interpreted.confidence >= 0.22 &&
-    !/^move no\b/i.test(interpreted.canonical)
+    !/^move no\b/i.test(interpreted.canonical) &&
+    !(blocksCreateRewrite(stance) && /^add\b/i.test(interpreted.canonical))
   ) {
     return { kind: "command", text: interpreted.canonical };
   }

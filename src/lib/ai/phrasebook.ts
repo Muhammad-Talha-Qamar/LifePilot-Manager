@@ -304,6 +304,46 @@ export const FEW_SHOT_EXAMPLES: Array<{
     intent: "help",
     action: "short capabilities reply; invite a natural request",
   },
+  {
+    user: "don't add milk to my list",
+    intent: "help",
+    action: "NO WRITE — acknowledge prohibition; do not create_task",
+  },
+  {
+    user: "Did I add milk to my list?",
+    intent: "query_schedule",
+    action: "search_records / list tasks about milk — do not create",
+  },
+  {
+    user: "what task i have tomorrow",
+    intent: "query_schedule",
+    action: "query_schedule period=tomorrow",
+  },
+  {
+    user: "I gotta finish my homework tomorrow",
+    intent: "complete",
+    action: "search homework → complete_task (not create 'finish homework')",
+  },
+  {
+    user: "Put buying milk on tomorrow's list",
+    intent: "create_task",
+    action: "create_task title=buying milk due=tomorrow",
+  },
+  {
+    user: "Make sure I don't forget to call mom",
+    intent: "create_task",
+    action: "create_task title=call mom",
+  },
+  {
+    user: "plz move my assigment to nex week",
+    intent: "reschedule",
+    action: "search assignment/homework → update due_date=next week (clarify day if needed)",
+  },
+  {
+    user: "shift science",
+    intent: "reschedule",
+    action: "ASK which day — incomplete reschedule slot",
+  },
 ];
 
 /** Human-readable glossary for the system prompt. */
@@ -366,7 +406,13 @@ export const PERSISTENCE_RULES = `
 export const DECISION_HEURISTICS = `
 ## Decision heuristics
 - Bare noun + date → create task (not a question).
-- Question words / "?", "left", "free", "busy", "on my plate" → query, do not create.
+- Question words / "?", "left", "free", "busy", "on my plate", broken grammar like "what task i have tomorrow" → query, do not create.
+- Negation: "don't add …", "never put … on my list" → do NOT create; acknowledge the prohibition.
+- "Did I add …?" / "Have I already …?" → look up existing records; do not create a duplicate.
+- "I gotta finish X" / "need to finish X" → complete existing work, not create a new task titled "finish X".
+- Pure intention vs instruction: prefer creating when the user asks you to remember/schedule/put on a list; for vague narration without a save cue, ask a short clarifying question instead of inventing a task.
+- Conditionals ("if I finish X, move it to Friday") → ask which part to do now; do not invent both steps.
+- Incomplete reschedule ("shift science") → ask for the target day.
 - "List:" or comma-separated shopping/packing items → checklist, not one task.
 - "Schedule my day/week" → plan/query; "schedule a call with …" → create task or event.
 - Pronouns (it / that / the second one) → conversation focus / lastTasks; search_records if unsure.
@@ -374,7 +420,8 @@ export const DECISION_HEURISTICS = `
 - Tasks without deadlines are NOT due today.
 - Completed tasks are never listed as still open.
 - Projects are not supported — use tasks or checklists instead.
-- Typos, slang, voice-to-text mess, and mixed languages are normal — infer intent.
+- Typos, slang, abbreviations (pls/plz/tmrw/ASAP), voice-to-text mess, and mixed languages are normal — infer meaning from the whole sentence.
+- Never silently change negation, dates, names, or priorities when repairing spelling.
 - Match the user's language when replying when practical.
 `.trim();
 
@@ -406,15 +453,19 @@ export function fewShotPromptBlock(limit = 36): string {
 export function localInterpretationHint(
   original: string,
   interpreted: string | null,
-  kind: "command" | "reply" | "pass" | "rewritten"
+  kind: "command" | "reply" | "pass" | "rewritten",
+  stanceNote?: string | null
 ): string {
+  const stanceLine = stanceNote
+    ? `\nSpeech-act prior: ${stanceNote} (local heuristic — trust full-sentence meaning over keywords).`
+    : "";
   if (kind === "reply") {
-    return `Local NLU thinks this is small talk / help (no data change). Still reply helpfully.`;
+    return `Local NLU thinks this is small talk / help / prohibition / clarification (no data change). Still reply helpfully.${stanceLine}`;
   }
   if (kind === "command" || kind === "rewritten") {
     if (interpreted && interpreted.trim().toLowerCase() !== original.trim().toLowerCase()) {
-      return `Local NLU paraphrase (heuristic, may be imperfect — verify with tools):\n"${interpreted}"`;
+      return `Local NLU paraphrase (heuristic, may be imperfect — verify with tools; do not invent records):\n"${interpreted}"${stanceLine}`;
     }
   }
-  return `Local NLU did not rewrite this; interpret freely with tools.`;
+  return `Local NLU did not rewrite this; interpret freely with tools using full-sentence meaning (questions ≠ creates; negation ≠ creates).${stanceLine}`;
 }

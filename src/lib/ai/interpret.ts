@@ -156,6 +156,27 @@ function isPronounSubject(text: string): boolean {
 
 function cueBoosts(norm: string): Partial<Record<IntentKind, number>> {
   const boosts: Partial<Record<IntentKind, number>> = {};
+
+  // Negation of create must suppress create scoring.
+  if (
+    /\b(?:do not|dont|don't|never)\s+(?:add|create|put|include|schedule)\b/.test(norm) &&
+    !/\b(?:dont|don't|do not)\s+forget\b/.test(norm)
+  ) {
+    boosts.create_task = (boosts.create_task ?? 0) - 0.8;
+    boosts.query_schedule = (boosts.query_schedule ?? 0) + 0.1;
+    return boosts;
+  }
+
+  // "gotta finish / need to finish" → complete, not create.
+  if (
+    /(?:gotta|got to|need to|have to|must|should|wanna|want to|gonna|going to)\s+(?:to\s+)?(?:finish|complete|wrap)/.test(
+      norm
+    )
+  ) {
+    boosts.complete = (boosts.complete ?? 0) + 0.45;
+    boosts.create_task = (boosts.create_task ?? 0) - 0.35;
+  }
+
   if (
     /\b(?:remind|don't forget|dont forget|nudge|ping|jot|todo|note|need to|have to|gotta|should|wanna|gonna|put .+ on|add |create |schedule (?!my (?:day|week|month)))\b/.test(
       norm
