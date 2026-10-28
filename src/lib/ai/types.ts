@@ -1,4 +1,11 @@
-import type { CalendarEvent, Checklist, ChecklistItem, Project, Task } from "@/types";
+import type {
+  CalendarEvent,
+  Checklist,
+  ChecklistItem,
+  Project,
+  Task,
+  UserMemory,
+} from "@/types";
 
 export interface EntityRef {
   id: string;
@@ -193,6 +200,8 @@ export interface Board {
   defaultDuration: number;
   workStart: string | null;
   workEnd: string | null;
+  /** Relevant persistent memories for this turn (not live task state). */
+  memories?: UserMemory[];
 }
 
 export function emptyContext(): ConversationContext {

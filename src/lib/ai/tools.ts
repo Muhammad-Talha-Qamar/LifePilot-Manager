@@ -19,18 +19,30 @@ import {
   updateTask,
   getChecklistItems,
 } from "@/lib/data/repository";
+import {
+  clearAllMemories,
+  deleteMemory,
+  deleteMemoriesByIds,
+  listMemories,
+  saveMemory,
+  updateMemory,
+} from "@/lib/data/memories";
 import { resolveDatePhrase, resolveRelativeDate } from "@/lib/utils/dates";
 import { runExtendedTool, verifyTaskWrite } from "./extra-tools";
+import { matchMemoriesForForget, retrieveRelevantMemories } from "./memory";
 import { sortTasksByPriorityThenDue as sortTasks } from "@/lib/utils/progress";
 import {
   createChecklistSchema,
   createEventSchema,
   createTaskSchema,
+  deleteMemorySchema,
   listTasksFilterSchema,
   manageChecklistItemsSchema,
+  saveMemorySchema,
   savePreferenceSchema,
   updateChecklistSchema,
   updateEventSchema,
+  updateMemorySchema,
   updateTaskSchema,
 } from "@/lib/validations/schemas";
 
@@ -348,6 +360,83 @@ export const TOOL_DEFINITIONS = [
   {
     type: "function" as const,
     function: {
+      name: "list_memories",
+      description:
+        "List this user's saved persistent preferences and context notes. Never invent memories. Task status is not stored here — use schedule/task tools for that.",
+      parameters: {
+        type: "object",
+        properties: {
+          query: {
+            type: "string",
+            description: "Optional relevance filter for context notes",
+          },
+          category: { type: "string", enum: ["preference", "context"] },
+        },
+      },
+    },
+  },
+  {
+    type: "function" as const,
+    function: {
+      name: "save_memory",
+      description:
+        "Save a durable preference or context note the user explicitly asked to keep. Never save casual narration, temporary plans, passwords, or inferred guesses. Requires user_confirmed=true. Prefer category=preference for communication/planning style; category=context for ongoing project notes (not task deadlines).",
+      parameters: {
+        type: "object",
+        properties: {
+          category: { type: "string", enum: ["preference", "context"] },
+          content: { type: "string" },
+          key: {
+            type: "string",
+            description:
+              "Optional stable key for upserts (e.g. communication_style, summary_length)",
+          },
+          tags: { type: "array", items: { type: "string" } },
+          user_confirmed: { type: "boolean" },
+        },
+        required: ["category", "content", "user_confirmed"],
+      },
+    },
+  },
+  {
+    type: "function" as const,
+    function: {
+      name: "update_memory",
+      description:
+        "Correct an existing saved memory by id after the user asks to change it.",
+      parameters: {
+        type: "object",
+        properties: {
+          id: { type: "string" },
+          content: { type: "string" },
+          category: { type: "string", enum: ["preference", "context"] },
+          tags: { type: "array", items: { type: "string" } },
+        },
+        required: ["id"],
+      },
+    },
+  },
+  {
+    type: "function" as const,
+    function: {
+      name: "forget_memory",
+      description:
+        "Delete saved memories the user wants removed. Pass id, a query to match, or clear_all. Requires user_confirmed=true. After deletion, do not reintroduce the removed content.",
+      parameters: {
+        type: "object",
+        properties: {
+          id: { type: "string" },
+          query: { type: "string" },
+          clear_all: { type: "boolean" },
+          user_confirmed: { type: "boolean" },
+        },
+        required: ["user_confirmed"],
+      },
+    },
+  },
+  {
+    type: "function" as const,
+    function: {
       name: "query_schedule",
       description:
         "Retrieve tasks and events for a period. Use this for today, tomorrow, yesterday, this week, next week, this month, next month (calendar month, not 30 days), the next 7 days, overdue work, tasks without deadlines, or a custom YYYY-MM-DD range. Completed tasks are omitted from unfinished lists.",
@@ -650,6 +739,107 @@ export async function executeTool(
         void _;
         const saved = await savePreferences(prefs, auth);
         return { success: true, result: saved };
+      }
+      case "list_memories": {
+        const args = z
+          .object({
+            query: z.string().optional(),
+            category: z.enum(["preference", "context"]).optional(),
+          })
+          .parse(rawArgs);
+        const all = await listMemories(auth);
+        const filtered = args.category
+          ? all.filter((m) => m.category === args.category)
+          : all;
+        if (args.query?.trim()) {
+          const retrieved = retrieveRelevantMemories(filtered, args.query.trim(), {
+            maxPreferences: 20,
+            maxContext: 10,
+          });
+          return {
+            success: true,
+            result: {
+              memories: retrieved.all,
+              note: "These are saved preferences/context notes, not live task state.",
+            },
+          };
+        }
+        return {
+          success: true,
+          result: {
+            memories: filtered,
+            note: "These are saved preferences/context notes, not live task state.",
+          },
+        };
+      }
+      case "save_memory": {
+        const parsed = saveMemorySchema.parse(rawArgs);
+        if (!parsed.user_confirmed) {
+          return {
+            success: false,
+            result: null,
+            error: "Saving memory requires user_confirmed=true after the user agrees.",
+          };
+        }
+        const saved = await saveMemory(
+          {
+            category: parsed.category,
+            content: parsed.content,
+            key: parsed.key,
+            tags: parsed.tags,
+          },
+          auth
+        );
+        return { success: true, result: saved };
+      }
+      case "update_memory": {
+        const parsed = updateMemorySchema.parse(rawArgs);
+        const { id, ...patch } = parsed;
+        const updated = await updateMemory(id, patch, auth);
+        return { success: true, result: updated };
+      }
+      case "forget_memory": {
+        const parsed = deleteMemorySchema.parse(rawArgs);
+        if (!parsed.user_confirmed) {
+          return {
+            success: false,
+            result: null,
+            error: "Forgetting memory requires user_confirmed=true.",
+          };
+        }
+        if (parsed.clear_all) {
+          const removed = await clearAllMemories(auth);
+          return { success: true, result: { removed, cleared: true } };
+        }
+        if (parsed.id) {
+          await deleteMemory(parsed.id, auth);
+          return { success: true, result: { removed: 1, ids: [parsed.id] } };
+        }
+        if (parsed.query?.trim()) {
+          const all = await listMemories(auth);
+          const matches = matchMemoriesForForget(all, parsed.query.trim());
+          if (!matches.length) {
+            return {
+              success: true,
+              result: { removed: 0, ids: [], note: "No matching memories found." },
+            };
+          }
+          const ids = matches.map((m) => m.id);
+          const removed = await deleteMemoriesByIds(ids, auth);
+          return {
+            success: true,
+            result: {
+              removed,
+              ids,
+              contents: matches.map((m) => m.content),
+            },
+          };
+        }
+        return {
+          success: false,
+          result: null,
+          error: "Provide id, query, or clear_all to forget memories.",
+        };
       }
       case "resolve_date": {
         const { phrase } = z.object({ phrase: z.string() }).parse(rawArgs);

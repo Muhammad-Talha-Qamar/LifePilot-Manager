@@ -28,11 +28,19 @@ function storePath(userId: string): string {
   return path.join(DATA_DIR, `${safe}.json`);
 }
 
+function normalizeStore(store: DemoStore): DemoStore {
+  // Older demo JSON files may lack memories — never rehydrate deleted fields as undefined.
+  if (!Array.isArray(store.memories)) {
+    store.memories = [];
+  }
+  return store;
+}
+
 async function readFromDisk(userId: string): Promise<DemoStore | null> {
   const raw = await readJsonText(storeKey(userId), storePath(userId));
   if (!raw) return null;
   try {
-    return JSON.parse(raw) as DemoStore;
+    return normalizeStore(JSON.parse(raw) as DemoStore);
   } catch {
     return null;
   }
@@ -59,7 +67,7 @@ export async function getDemoStore(
   }
 
   const cached = g.memoryByUser.get(userId);
-  if (cached) return cached;
+  if (cached) return normalizeStore(cached);
 
   const store = createEmptyStore(
     userId,

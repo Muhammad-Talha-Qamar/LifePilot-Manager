@@ -1,5 +1,5 @@
 import { formatInTimeZone, fromZonedTime } from "date-fns-tz";
-import type { CalendarEvent, ChecklistItem, Project, Task } from "@/types";
+import type { CalendarEvent, ChecklistItem, Project, Task, UserMemory } from "@/types";
 import {
   calendarToday,
   detectPeriodKind,
@@ -42,6 +42,7 @@ import {
   titleCase,
 } from "./match";
 import { understandInput } from "./understand";
+import { detectMemoryIntent } from "./memory";
 import type {
   AssistantBlock,
   Board,
@@ -51,6 +52,155 @@ import type {
   ScheduleQueryResult,
 } from "./types";
 import { friendlyFailure } from "./user-messages";
+
+function prefersConcise(board: Board): boolean {
+  return (board.memories ?? []).some((memory) => {
+    if (memory.category !== "preference") return false;
+    const text = `${memory.key ?? ""} ${memory.content}`.toLowerCase();
+    return /\b(concise|brief|short)\b/.test(text);
+  });
+}
+
+function applyMemoryStyle(message: string, board: Board): string {
+  if (!prefersConcise(board)) return message;
+  // Keep local replies tighter when the user asked for concise summaries.
+  const lines = message
+    .split("\n")
+    .map((line) => line.trimEnd())
+    .filter((line, index, all) => !(line === "" && all[index - 1] === ""));
+  if (lines.length <= 4) return lines.join("\n");
+  return lines.slice(0, 4).join("\n");
+}
+
+async function handleMemoryIntent(
+  raw: string,
+  context: ConversationContext,
+  board: Board,
+  act: ToolHandler
+): Promise<LocalCommandResult | null> {
+  const intent = detectMemoryIntent(raw);
+  if (intent.kind === "none") return null;
+
+  if (intent.kind === "list") {
+    const listed = await act("list_memories", {});
+    if (!listed.success) {
+      return {
+        message: friendlyFailure("load your saved memories", listed.error),
+        blocks: [],
+        context,
+      };
+    }
+    const memories =
+      (listed.result as { memories?: { category: string; content: string; key: string | null }[] })
+        ?.memories ?? [];
+    if (!memories.length) {
+      return {
+        message:
+          "I don't have any saved preferences or context notes for you yet. Say something like “remember that I prefer concise summaries” if you want me to keep one.",
+        blocks: [],
+        context,
+      };
+    }
+    const lines = memories.map(
+      (memory, index) =>
+        `${index + 1}. (${memory.category}${memory.key ? ` · ${memory.key}` : ""}) ${memory.content}`
+    );
+    return {
+      message: applyMemoryStyle(
+        `Here's what I've saved (preferences and notes — not live task status):\n${lines.join("\n")}`,
+        board
+      ),
+      blocks: [],
+      context,
+    };
+  }
+
+  if (intent.kind === "forget") {
+    const args =
+      intent.forgetQuery === "*"
+        ? { clear_all: true, user_confirmed: true }
+        : { query: intent.forgetQuery, user_confirmed: true };
+    const forgotten = await act("forget_memory", args);
+    if (!forgotten.success) {
+      return {
+        message: friendlyFailure("forget that", forgotten.error),
+        blocks: [],
+        context,
+      };
+    }
+    const result = forgotten.result as {
+      removed?: number;
+      contents?: string[];
+      note?: string;
+    };
+    const removed = result.removed ?? 0;
+    if (!removed) {
+      return {
+        message: "I didn't find a matching saved memory to forget.",
+        blocks: [],
+        context,
+      };
+    }
+    // Drop deleted items from this turn's board cache so they aren't reintroduced.
+    if (board.memories?.length) {
+      const gone = new Set(result.contents ?? []);
+      board.memories = board.memories.filter((memory) => !gone.has(memory.content));
+      if (intent.forgetQuery === "*") board.memories = [];
+    }
+    return {
+      message: applyMemoryStyle(
+        removed === 1
+          ? "Forgot that saved memory. I won't use it anymore."
+          : `Forgot ${removed} saved memories. I won't use them anymore.`,
+        board
+      ),
+      blocks: [],
+      context,
+    };
+  }
+
+  if (intent.kind === "save" && intent.content && intent.category) {
+    const saved = await act("save_memory", {
+      category: intent.category,
+      content: intent.content,
+      key: intent.key ?? undefined,
+      user_confirmed: true,
+    });
+    if (!saved.success) {
+      return {
+        message: friendlyFailure("save that memory", saved.error),
+        blocks: [],
+        context,
+      };
+    }
+    const memory = saved.result as {
+      id: string;
+      category: string;
+      content: string;
+      key: string | null;
+      tags: string[];
+      user_id: string;
+      created_at: string;
+      updated_at: string;
+    };
+    board.memories = [
+      memory as UserMemory,
+      ...(board.memories ?? []).filter((m) => !(memory.key && m.key === memory.key)),
+    ];
+    return {
+      message: applyMemoryStyle(
+        intent.category === "preference"
+          ? `Got it — I'll remember that preference: “${intent.content}”. You can change or forget it anytime in Settings or by saying “forget …”`
+          : `Got it — I'll keep that note: “${intent.content}”. Say “forget …” if you want it removed.`,
+        board
+      ),
+      blocks: [],
+      context,
+    };
+  }
+
+  return null;
+}
 
 export interface ToolOutcome {
   success: boolean;
@@ -630,6 +780,10 @@ export async function runLocalCommand(
     context.pendingInterpretation = null;
   }
 
+  // Explicit memory remember / forget / list before task NLU.
+  const memoryHandled = await handleMemoryIntent(raw, context, board, act);
+  if (memoryHandled) return memoryHandled;
+
   // Google-like spelling / intent surface interpretation (before acting).
   const decision = resolveInterpretation(raw);
   const interpBlock = interpretationBlock(decision);
@@ -1131,7 +1285,11 @@ export async function runLocalCommand(
   };
   })();
 
-  return withInterpretation(coreResult, interpBlock);
+  const styled: LocalCommandResult = {
+    ...coreResult,
+    message: applyMemoryStyle(coreResult.message, board),
+  };
+  return withInterpretation(styled, interpBlock);
 }
 
 /**
@@ -1225,8 +1383,8 @@ async function handleContextFollowUps(
     /^(?:show|see|open|display)\b/.test(norm) &&
     /\b(?:again|that|this|it)\b/.test(norm)
   ) {
-    if (context.focus?.kind === "task" || (/\btask\b/.test(norm) && context.focus?.kind === "task")) {
-      const id = context.focus?.kind === "task" ? context.focus.id : null;
+    if (context.focus?.kind === "task") {
+      const id = context.focus.id;
       if (id) {
         const verified = verifyTaskId(id, board);
         if (verified.ok) {

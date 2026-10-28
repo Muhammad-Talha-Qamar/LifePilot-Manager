@@ -122,6 +122,22 @@ export interface ProductivityPreferences {
   updated_at: string;
 }
 
+/** Durable AI memory — preferences and context notes, not live task state. */
+export type MemoryCategory = "preference" | "context";
+
+export interface UserMemory {
+  id: string;
+  user_id: string;
+  /** preference = durable style/settings; context = ongoing project notes. */
+  category: MemoryCategory;
+  /** Stable upsert key (e.g. communication_style). Null for free-form notes. */
+  key: string | null;
+  content: string;
+  tags: string[];
+  created_at: string;
+  updated_at: string;
+}
+
 export interface AiMessage {
   id: string;
   role: "user" | "assistant" | "system";

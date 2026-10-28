@@ -9,6 +9,7 @@ import type {
   Project,
   Reminder,
   Task,
+  UserMemory,
 } from "@/types";
 
 function isoDaysFromNow(days: number, time = "09:00:00"): string {
@@ -29,6 +30,8 @@ export interface DemoStore {
   checklist_items: ChecklistItem[];
   events: CalendarEvent[];
   reminders: Reminder[];
+  /** Durable AI preferences / context notes (not live task state). */
+  memories: UserMemory[];
 }
 
 /** Empty account — used for every new sign-up. No sample tasks/checklists. */
@@ -72,6 +75,7 @@ export function createEmptyStore(
     checklist_items: [],
     events: [],
     reminders: [],
+    memories: [],
   };
 }
 
@@ -317,5 +321,6 @@ export function createSeedStore(
     checklist_items,
     events,
     reminders,
+    memories: [],
   };
 }

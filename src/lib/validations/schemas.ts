@@ -139,6 +139,30 @@ export const savePreferenceSchema = z.object({
   categories: z.array(z.string().max(50)).max(50).optional(),
 });
 
+export const memoryCategorySchema = z.enum(["preference", "context"]);
+
+export const saveMemorySchema = z.object({
+  category: memoryCategorySchema,
+  content: z.string().trim().min(1).max(500),
+  key: z.string().trim().min(1).max(64).nullable().optional(),
+  tags: z.array(z.string().trim().min(1).max(40)).max(16).optional(),
+  user_confirmed: z.boolean(),
+});
+
+export const updateMemorySchema = z.object({
+  id: z.string().uuid(),
+  content: z.string().trim().min(1).max(500).optional(),
+  category: memoryCategorySchema.optional(),
+  tags: z.array(z.string().trim().min(1).max(40)).max(16).optional(),
+});
+
+export const deleteMemorySchema = z.object({
+  id: z.string().uuid().optional(),
+  query: z.string().trim().min(1).max(200).optional(),
+  clear_all: z.boolean().optional(),
+  user_confirmed: z.boolean(),
+});
+
 /** Compressed JPEG data URL from the client, or null to clear. */
 export const updateProfileAvatarSchema = z.object({
   avatar_url: z

@@ -18,6 +18,7 @@ export const READ_TOOLS = new Set([
   "resolve_date",
   "propose_daily_plan",
   "get_productivity_summary",
+  "list_memories",
 ]);
 
 export const WRITE_TOOLS = new Set([
@@ -36,6 +37,9 @@ export const WRITE_TOOLS = new Set([
   "delete_event",
   "undo_last_change",
   "save_productivity_preference",
+  "save_memory",
+  "update_memory",
+  "forget_memory",
 ]);
 
 export function isWriteTool(name: string): boolean {
@@ -186,6 +190,10 @@ export function toolActivityLabel(name: string): string {
     resolve_date: "Resolving date",
     propose_daily_plan: "Building day plan",
     save_productivity_preference: "Saving preference",
+    list_memories: "Checking memories",
+    save_memory: "Saving memory",
+    update_memory: "Updating memory",
+    forget_memory: "Forgetting memory",
   };
   return labels[name] ?? "Working";
 }
