@@ -4,6 +4,7 @@ import {
   completeTask,
   createChecklist,
   createEvent,
+  createProject,
   createTask,
   deleteTask,
   getPreferences,
@@ -11,11 +12,13 @@ import {
   getTask,
   listChecklists,
   listEvents,
+  listProjects,
   listTasks,
   manageChecklistItem,
   savePreferences,
   updateChecklist,
   updateEvent,
+  updateProject,
   updateTask,
   getChecklistItems,
 } from "@/lib/data/repository";
@@ -34,6 +37,7 @@ import { sortTasksByPriorityThenDue as sortTasks } from "@/lib/utils/progress";
 import {
   createChecklistSchema,
   createEventSchema,
+  createProjectSchema,
   createTaskSchema,
   deleteMemorySchema,
   listTasksFilterSchema,
@@ -43,8 +47,22 @@ import {
   updateChecklistSchema,
   updateEventSchema,
   updateMemorySchema,
+  updateProjectSchema,
   updateTaskSchema,
 } from "@/lib/validations/schemas";
+
+/** Reject foreign project ids — never trust model-supplied ownership. */
+async function assertOwnedProjectId(
+  projectId: string | null | undefined,
+  auth: AuthContext
+): Promise<string | null> {
+  if (!projectId) return null;
+  const owned = (await listProjects(auth)).some((project) => project.id === projectId);
+  if (!owned) {
+    throw new Error("That project was not found in your account.");
+  }
+  return projectId;
+}
 
 export const TOOL_DEFINITIONS = [
   {
@@ -310,9 +328,99 @@ export const TOOL_DEFINITIONS = [
   {
     type: "function" as const,
     function: {
+      name: "list_projects",
+      description:
+        "List the user's active projects. Use before assigning tasks or updating a project by name.",
+      parameters: {
+        type: "object",
+        properties: {
+          incomplete_only: { type: "boolean" },
+        },
+      },
+    },
+  },
+  {
+    type: "function" as const,
+    function: {
+      name: "create_project",
+      description:
+        "Create a project (named container for related tasks). Resolve deadline phrases to YYYY-MM-DD first. Do not create a duplicate of an identically named active project.",
+      parameters: {
+        type: "object",
+        properties: {
+          name: { type: "string" },
+          description: { type: "string" },
+          status: {
+            type: "string",
+            enum: ["active", "on_hold", "completed", "archived"],
+          },
+          priority: { type: "string", enum: ["low", "medium", "high", "urgent"] },
+          start_date: { type: "string", description: "YYYY-MM-DD" },
+          deadline: { type: "string", description: "YYYY-MM-DD" },
+        },
+        required: ["name"],
+      },
+    },
+  },
+  {
+    type: "function" as const,
+    function: {
+      name: "update_project",
+      description:
+        "Update an existing project by id (name, deadline, status, priority). Use for deadline changes and corrections — never create a duplicate.",
+      parameters: {
+        type: "object",
+        properties: {
+          id: { type: "string" },
+          name: { type: "string" },
+          description: { type: "string" },
+          status: { type: "string" },
+          priority: { type: "string" },
+          start_date: { type: "string" },
+          deadline: { type: "string" },
+          is_archived: { type: "boolean" },
+        },
+        required: ["id"],
+      },
+    },
+  },
+  {
+    type: "function" as const,
+    function: {
+      name: "delete_project",
+      description: "Delete a project after the user explicitly confirms.",
+      parameters: {
+        type: "object",
+        properties: {
+          id: { type: "string" },
+          confirmed: { type: "boolean" },
+        },
+        required: ["id", "confirmed"],
+      },
+    },
+  },
+  {
+    type: "function" as const,
+    function: {
+      name: "move_tasks_to_project",
+      description:
+        "Assign one or more existing tasks to a project. Resolve project and task ids with search_records first. Reports partial success if some ids fail.",
+      parameters: {
+        type: "object",
+        properties: {
+          project_id: { type: "string" },
+          task_ids: { type: "array", items: { type: "string" } },
+        },
+        required: ["project_id", "task_ids"],
+      },
+    },
+  },
+  {
+    type: "function" as const,
+    function: {
       name: "get_productivity_summary",
       description:
-        "Get today's tasks, overdue work, upcoming deadlines/events, and completion stats.",
+        "Get today's tasks, overdue work, upcoming deadlines/events, projects, and completion stats.",
       parameters: { type: "object", properties: {} },
     },
   },
@@ -471,12 +579,15 @@ export const TOOL_DEFINITIONS = [
     function: {
       name: "search_records",
       description:
-        "Find existing tasks, checklists, or events by a fuzzy name before updating/completing/deleting them. Always search first when the user refers to something by title ('the essay', 'maths homework', 'groceries') instead of inventing ids.",
+        "Find existing tasks, projects, checklists, or events by a fuzzy name before updating/completing/deleting them. Always search first when the user refers to something by title ('the essay', 'maths homework', 'science project', 'groceries') instead of inventing ids.",
       parameters: {
         type: "object",
         properties: {
           query: { type: "string" },
-          kind: { type: "string", enum: ["task", "checklist", "event", "any"] },
+          kind: {
+            type: "string",
+            enum: ["task", "project", "checklist", "event", "any"],
+          },
         },
         required: ["query"],
       },
@@ -597,12 +708,16 @@ export async function executeTool(
       }
       case "create_task": {
         const input = createTaskSchema.parse(rawArgs);
-        const task = await createTask(input, auth);
+        const projectId = await assertOwnedProjectId(input.project_id, auth);
+        const task = await createTask({ ...input, project_id: projectId }, auth);
         return verifyTaskWrite(task, auth);
       }
       case "update_task": {
         const input = updateTaskSchema.parse(rawArgs);
         const { id, ...patch } = input;
+        if (patch.project_id !== undefined) {
+          patch.project_id = await assertOwnedProjectId(patch.project_id, auth);
+        }
         const task = await updateTask(id, patch, auth);
         return verifyTaskWrite(task, auth);
       }
@@ -639,12 +754,16 @@ export async function executeTool(
       }
       case "create_checklist": {
         const input = createChecklistSchema.parse(rawArgs);
-        const result = await createChecklist(input, auth);
+        const projectId = await assertOwnedProjectId(input.project_id, auth);
+        const result = await createChecklist({ ...input, project_id: projectId }, auth);
         return { success: true, result };
       }
       case "update_checklist": {
         const input = updateChecklistSchema.parse(rawArgs);
         const { id, ...patch } = input;
+        if (patch.project_id !== undefined) {
+          patch.project_id = await assertOwnedProjectId(patch.project_id, auth);
+        }
         const checklist = await updateChecklist(id, patch, auth);
         return { success: true, result: checklist };
       }
@@ -666,14 +785,65 @@ export async function executeTool(
       }
       case "create_event": {
         const input = createEventSchema.parse(rawArgs);
-        const event = await createEvent(input, auth);
+        const projectId = await assertOwnedProjectId(input.project_id, auth);
+        const event = await createEvent({ ...input, project_id: projectId }, auth);
         return { success: true, result: event };
       }
       case "update_event": {
         const input = updateEventSchema.parse(rawArgs);
         const { id, ...patch } = input;
+        if (patch.project_id !== undefined) {
+          patch.project_id = await assertOwnedProjectId(patch.project_id, auth);
+        }
         const event = await updateEvent(id, patch, auth);
         return { success: true, result: event };
+      }
+      case "list_projects": {
+        const incompleteOnly = Boolean(rawArgs.incomplete_only);
+        const projects = await listProjects(auth);
+        const filtered = incompleteOnly
+          ? projects.filter(
+              (project) => project.status === "active" || project.status === "on_hold"
+            )
+          : projects;
+        return { success: true, result: filtered };
+      }
+      case "create_project": {
+        const input = createProjectSchema.parse(rawArgs);
+        const existing = (await listProjects(auth)).find(
+          (project) => project.name.trim().toLowerCase() === input.name.trim().toLowerCase()
+        );
+        if (existing) {
+          return {
+            success: true,
+            result: existing,
+            error: undefined,
+          };
+        }
+        const project = await createProject(input, auth);
+        const verified = (await listProjects(auth)).find((item) => item.id === project.id);
+        if (!verified) {
+          return {
+            success: false,
+            result: null,
+            error: "Project write could not be verified.",
+          };
+        }
+        return { success: true, result: verified };
+      }
+      case "update_project": {
+        const input = updateProjectSchema.parse(rawArgs);
+        const { id, ...patch } = input;
+        const project = await updateProject(id, patch, auth);
+        const verified = (await listProjects(auth)).find((item) => item.id === project.id);
+        if (!verified) {
+          return {
+            success: false,
+            result: null,
+            error: "Project update could not be verified.",
+          };
+        }
+        return { success: true, result: verified };
       }
       case "get_productivity_summary": {
         const summary = await getProductivitySummary(auth);

@@ -347,6 +347,7 @@ describe("language eval — stance regression matrix", () => {
     ["what task i have tomorrow", "query"],
     ["I gotta finish maths homework", "complete_focus"],
     ["if I finish science move it to friday", "conditional"],
+    ["I might do homework tomorrow.", "suggestion"],
     ["Make sure I don't forget to call mom", "unknown"],
   ];
 

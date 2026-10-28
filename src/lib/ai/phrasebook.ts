@@ -451,6 +451,7 @@ export const DECISION_HEURISTICS = `
 - "Did I add …?" / "Have I already …?" → look up existing records; do not create a duplicate.
 - "I gotta finish X" / "need to finish X" → complete existing work, not create a new task titled "finish X".
 - Pure intention vs instruction: prefer creating when the user asks you to remember/schedule/put on a list; for vague narration without a save cue, ask a short clarifying question instead of inventing a task.
+- Tentative phrasing ("I might…", "maybe I should…", "thinking about…") without an explicit save request → ask before creating; do not invent a task.
 - Conditionals ("if I finish X, move it to Friday") → ask which part to do now; do not invent both steps.
 - Incomplete reschedule ("shift science") → ask for the target day.
 - "List:" or comma-separated shopping/packing items → checklist, not one task.
@@ -463,7 +464,7 @@ export const DECISION_HEURISTICS = `
 - Relative dates → resolve_date or query_schedule; next month = next calendar month.
 - Tasks without deadlines are NOT due today.
 - Completed tasks are never listed as still open.
-- Projects are not supported — use tasks or checklists instead.
+- Projects are supported: create/list/update/delete projects, assign tasks into them, and change project deadlines via tools. Prefer a project when the user organizes related work under one named effort.
 - Typos, slang, abbreviations (pls/plz/tmrw/ASAP), voice-to-text mess, and mixed languages are normal — infer meaning from the whole sentence.
 - Never silently change negation, dates, names, or priorities when repairing spelling.
 - Match the user's language when replying when practical.

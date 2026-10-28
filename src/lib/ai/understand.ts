@@ -62,13 +62,10 @@ function softCreate(text: string): string | null {
   );
   if (probably) return `add ${probably[1]}`;
 
-  // "make sure I don't forget to …" / "make sure I …"
-  const makeSureForget = text.match(
-    /^(?:make sure(?: that)? i|ensure i)\s+don'?t\s+forget(?:\s+to)?\s+(.+)$/i
+  // "make sure I don't forget / remember to …" / "make sure I …"
+  const makeSure = text.match(
+    /^(?:make sure(?: that)? i|ensure i)\s+(?:(?:don'?t\s+forget|do not forget|remember)(?:\s+to)?\s+)?(.+)$/i
   );
-  if (makeSureForget) return `add ${makeSureForget[1]}`;
-
-  const makeSure = text.match(/^(?:make sure(?: that)? i|ensure i)\s+(.+)$/i);
   if (makeSure && !/\bdon'?t\s+add\b/i.test(makeSure[1])) {
     return `add ${makeSure[1]}`;
   }
@@ -341,6 +338,14 @@ export function understandInput(raw: string): Understood {
     };
   }
 
+  if (stance.kind === "suggestion") {
+    return {
+      kind: "reply",
+      message:
+        "Sounds like you're still deciding. Want me to save that as a task, or leave it for now?",
+    };
+  }
+
   if (stance.kind === "complete_focus") {
     const subject = extractFinishSubject(text);
     if (subject) {
@@ -382,6 +387,13 @@ export function understandInput(raw: string): Understood {
       kind: "reply",
       message:
         "That sounds like an if/then plan. Tell me the action you want right now (for example: “move science to Friday”), and I’ll do that part.",
+    };
+  }
+  if (/^__clarify_suggestion__/i.test(rewrittenNorm)) {
+    return {
+      kind: "reply",
+      message:
+        "Sounds like you're still deciding. Want me to save that as a task, or leave it for now?",
     };
   }
 

@@ -3,11 +3,14 @@ import type { AuthContext } from "@/lib/data/auth";
 import {
   deleteChecklist,
   deleteEvent,
+  deleteProject,
   getChecklistItems,
   getTask,
   listChecklists,
+  listProjects,
   listTasks,
   manageChecklistItem,
+  updateTask,
 } from "@/lib/data/repository";
 import { rankByName } from "./match";
 import { querySchedule } from "./schedule";
@@ -78,12 +81,14 @@ export async function runExtendedTool(
         const args = z
           .object({
             query: z.string().min(1),
-            kind: z.enum(["task", "checklist", "event", "any"]).optional(),
+            kind: z.enum(["task", "project", "checklist", "event", "any"]).optional(),
           })
           .parse(rawArgs);
         const kind = args.kind ?? "any";
         const tasks =
           kind === "any" || kind === "task" ? await listTasks({ limit: 100 }, auth) : [];
+        const projects =
+          kind === "any" || kind === "project" ? await listProjects(auth) : [];
         const checklists =
           kind === "any" || kind === "checklist" ? await listChecklists(auth) : [];
         const checklistItemMatches =
@@ -117,6 +122,14 @@ export async function runExtendedTool(
             status: row.item.status,
             due_date: row.item.due_date,
           })),
+          ...rankByName(args.query, projects, (project) => project.name).map((row) => ({
+            kind: "project" as const,
+            id: row.item.id,
+            label: row.item.name,
+            score: row.score,
+            status: row.item.status,
+            deadline: row.item.deadline,
+          })),
           ...rankByName(args.query, checklists, (checklist) => checklist.title).map((row) => ({
             kind: "checklist" as const,
             id: row.item.id,
@@ -128,6 +141,42 @@ export async function runExtendedTool(
           .sort((a, b) => b.score - a.score)
           .slice(0, 8);
         return { success: true, result: { query: args.query, matches } };
+      }
+      case "move_tasks_to_project": {
+        const args = z
+          .object({
+            project_id: z.string().uuid(),
+            task_ids: z.array(z.string().uuid()).min(1).max(50),
+          })
+          .parse(rawArgs);
+        const project = (await listProjects(auth)).find((item) => item.id === args.project_id);
+        if (!project) return { success: false, result: null, error: "Project not found." };
+        const updated: Task[] = [];
+        const failed: { id: string; error: string }[] = [];
+        for (const id of args.task_ids) {
+          try {
+            await updateTask(id, { project_id: project.id }, auth);
+            const verified = await getTask(id, auth);
+            if (verified.project_id !== project.id) {
+              failed.push({ id, error: "Verification failed" });
+            } else {
+              updated.push(verified);
+            }
+          } catch (error) {
+            failed.push({
+              id,
+              error: error instanceof Error ? error.message : "Update failed",
+            });
+          }
+        }
+        const ok = updated.length > 0 && failed.length === 0;
+        return {
+          success: ok,
+          result: { project, updated, failed },
+          error: failed.length
+            ? `Moved ${updated.length} task(s). ${failed.length} failed.`
+            : undefined,
+        };
       }
       case "add_checklist_items": {
         const args = z
@@ -225,6 +274,7 @@ export async function runExtendedTool(
         };
       }
       case "delete_checklist":
+      case "delete_project":
       case "delete_event": {
         const args = z
           .object({ id: z.string().uuid(), confirmed: z.boolean() })
@@ -240,6 +290,10 @@ export async function runExtendedTool(
           await deleteChecklist(args.id, auth);
           const still = (await listChecklists(auth)).some((item) => item.id === args.id);
           if (still) return { success: false, result: null, error: "Checklist was not deleted." };
+        } else if (name === "delete_project") {
+          await deleteProject(args.id, auth);
+          const still = (await listProjects(auth)).some((item) => item.id === args.id);
+          if (still) return { success: false, result: null, error: "Project was not deleted." };
         } else {
           await deleteEvent(args.id, auth);
         }

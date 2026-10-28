@@ -853,19 +853,15 @@ export async function runLocalCommand(
       : nluSeed;
   const norm = normalizeCommand(workingRaw);
 
-  // Only block explicit project create/manage — "show that project again" is handled earlier.
-  if (
-    /\bprojects?\b/.test(norm) &&
-    /^(?:add|create|make|new|delete|move|list|show|update)\b/.test(norm) &&
-    !(/^(?:show|see|open|display)\b/.test(norm) && /\bagain\b/.test(norm))
-  ) {
-    return {
-      message:
-        "Projects aren't available in LifePilot. Use a task or checklist instead.",
-      blocks: [],
-      context,
-    };
-  }
+  // Multi-part: create project + tasks (+ optional schedule one task).
+  const compound = await handleCompoundProjectAndTasks(
+    nluSeed,
+    workingRaw,
+    context,
+    board,
+    act
+  );
+  if (compound) return compound;
 
   const correction = norm.match(
     /^(?:no|nope|wait|actually|sorry)[, ]+(?:i meant|make it|change it to|it should be|that should be)\s+(.+)$/
@@ -1043,10 +1039,50 @@ export async function runLocalCommand(
 
   const moveAll = norm.match(/move all (?:my )?(.+?) tasks? into (?:that|this|the)?\s*project/);
   if (moveAll) {
+    const projectRef = context.lastProject
+      ? { project: board.projects.find((project) => project.id === context.lastProject?.id) }
+      : null;
+    const project = projectRef?.project;
+    if (!project) {
+      return { message: "Which project should I move them into?", blocks: [], context };
+    }
+    const phrase = moveAll[1];
+    const openTasks = board.tasks.filter(
+      (task) => task.status !== "done" && task.status !== "cancelled"
+    );
+    const matches = tasksAbout(phrase, openTasks);
+    if (!matches.length) {
+      return {
+        message: `I couldn't find tasks matching “${cleanPhrase(phrase)}”. Nothing was moved.`,
+        blocks: [],
+        context,
+      };
+    }
+    const result = await act("move_tasks_to_project", {
+      project_id: project.id,
+      task_ids: matches.map((task) => task.id),
+    });
+    if (!result.success) {
+      return { message: failed("move those tasks", result.error), blocks: [], context };
+    }
+    const payload = result.result as { updated: Task[]; project: Project; failed?: unknown[] };
+    payload.updated.forEach((task) => rememberTask(context, task));
+    rememberProject(context, payload.project);
+    const failNote =
+      Array.isArray(payload.failed) && payload.failed.length
+        ? ` ${payload.failed.length} could not be moved.`
+        : "";
     return {
-      message:
-        "Projects aren't available in LifePilot. Use a task or checklist instead.",
-      blocks: [],
+      message: `Moved ${payload.updated.length} task(s) into “${payload.project.name}”: ${payload.updated.map((task) => task.title).join(", ")}.${failNote}`,
+      blocks: [
+        {
+          type: "tasks",
+          title: payload.project.name,
+          tasks: payload.updated.map((task) =>
+            toTaskCard(task, [payload.project], board.timezone)
+          ),
+        },
+      ],
       context,
     };
   }
@@ -1054,11 +1090,43 @@ export async function runLocalCommand(
   const moveOneInto = norm.match(
     /^(?:move|put|assign) (.+?) into (?:the |my )?(.+?)(?: project)?$/
   );
-  if (moveOneInto && !/\ball\b/.test(norm)) {
+  if (moveOneInto && !/\ball\b/.test(norm) && !/\bchecklist\b/.test(norm)) {
+    const taskResolved = resolveTaskPhrase(moveOneInto[1], board, context);
+    if ("ask" in taskResolved) return { message: taskResolved.ask, blocks: [], context };
+    if ("none" in taskResolved) return { message: taskResolved.none, blocks: [], context };
+    const projectResolved = resolveProjectPhrase(
+      moveOneInto[2].replace(/\s+project$/, ""),
+      board,
+      context
+    );
+    if ("ask" in projectResolved) {
+      return { message: projectResolved.ask, blocks: [], context };
+    }
+    if ("none" in projectResolved) {
+      return { message: projectResolved.none, blocks: [], context };
+    }
+    const target = taskResolved.tasks[0];
+    const project = projectResolved.project;
+    const result = await act("move_tasks_to_project", {
+      project_id: project.id,
+      task_ids: [target.id],
+    });
+    if (!result.success) {
+      return { message: failed("move that task", result.error), blocks: [], context };
+    }
+    const payload = result.result as { updated: Task[]; project: Project };
+    const moved = payload.updated[0] ?? target;
+    rememberTask(context, moved);
+    rememberProject(context, payload.project);
     return {
-      message:
-        "Projects aren't available in LifePilot. Use a task or checklist instead.",
-      blocks: [],
+      message: `Moved “${moved.title}” into “${payload.project.name}”.`,
+      blocks: [
+        {
+          type: "tasks",
+          title: payload.project.name,
+          tasks: [toTaskCard(moved, [payload.project], board.timezone)],
+        },
+      ],
       context,
     };
   }
@@ -1250,6 +1318,10 @@ export async function runLocalCommand(
 
   if (/checklist/.test(norm) && /^(?:add|create|make|start)\b/.test(norm)) {
     return createChecklistCommand(workingRaw, norm, context, board, act);
+  }
+
+  if (/\bproject\b/.test(norm) && /^(?:add|create|make|start|new)\b/.test(norm)) {
+    return createProjectCommand(workingRaw, norm, context, board, act);
   }
 
   if (
@@ -2336,6 +2408,147 @@ async function createChecklistCommand(
       },
     ],
     context,
+  };
+}
+
+/**
+ * Handle multi-part requests such as:
+ * "Create a science project, add research and poster design tasks, and schedule the research for Friday."
+ */
+async function handleCompoundProjectAndTasks(
+  raw: string,
+  _working: string,
+  context: ConversationContext,
+  board: Board,
+  act: ToolHandler
+): Promise<LocalCommandResult | null> {
+  const text = raw.replace(/[.!?…]+$/g, "").trim();
+  const match = text.match(
+    /^(?:create|make|add|start)\s+(?:a\s+|an\s+|my\s+)?(.+?)\s+project\s*[,;]?\s+(?:and\s+)?(?:add|create|make)\s+(.+?)\s+tasks?(?:\s*[,;]?\s*(?:and\s+)?(?:schedule|set|due)\s+(?:the\s+)?(.+?)\s+for\s+(.+))?$/i
+  );
+  if (!match) return null;
+
+  const projectName = titleCase(cleanPhrase(match[1]));
+  if (!projectName) return null;
+
+  const taskPart = cleanPhrase(match[2]);
+  const taskTitles = parseItemList(taskPart).map((title) => cleanPhrase(title)).filter(Boolean);
+  if (!taskTitles.length) return null;
+
+  const scheduleSubject = match[3] ? cleanPhrase(match[3]) : "";
+  const scheduleWhen = match[4] ? normalizeCommand(match[4]) : "";
+  let dueDate: string | null = null;
+  if (scheduleWhen) {
+    const resolved = resolveDatePhrase(
+      scheduleWhen,
+      board.timezone,
+      board.weekStartsOn,
+      board.now
+    );
+    if (resolved?.type === "ambiguous") {
+      return { message: resolved.question, blocks: [], context };
+    }
+    if (!resolved || resolved.type !== "day") {
+      return {
+        message:
+          "I need a specific day for that scheduled task before I can finish the multi-step request. Nothing was saved yet.",
+        blocks: [],
+        context,
+      };
+    }
+    dueDate = resolved.date;
+  }
+
+  const notes: string[] = [];
+  const blocks: AssistantBlock[] = [];
+  let project =
+    board.projects.find(
+      (item) => item.name.trim().toLowerCase() === projectName.toLowerCase()
+    ) ?? null;
+
+  if (project) {
+    rememberProject(context, project);
+    notes.push(`“${project.name}” already exists, so I reused it`);
+  } else {
+    const created = await act("create_project", { name: projectName });
+    project = created.result as Project | null;
+    if (!created.success || !project) {
+      return {
+        message: failed("create that project", created.error),
+        blocks: [],
+        context,
+      };
+    }
+    board.projects.unshift(project);
+    rememberProject(context, project);
+    notes.push(`Created project “${project.name}”`);
+    blocks.push({
+      type: "projects",
+      title: "New project",
+      projects: [toProjectCard(project, [], [])],
+    });
+  }
+
+  const createdTasks: Task[] = [];
+  const failedTitles: string[] = [];
+  for (const title of taskTitles) {
+    const scheduleThis =
+      dueDate &&
+      scheduleSubject &&
+      (title.toLowerCase().includes(scheduleSubject.toLowerCase()) ||
+        scheduleSubject.toLowerCase().includes(title.toLowerCase()));
+    const duplicate = board.tasks.find(
+      (task) =>
+        task.title.toLowerCase() === title.toLowerCase() &&
+        task.project_id === project!.id &&
+        task.status !== "cancelled"
+    );
+    if (duplicate) {
+      rememberTask(context, duplicate);
+      createdTasks.push(duplicate);
+      notes.push(`reused existing task “${duplicate.title}”`);
+      continue;
+    }
+    const result = await act("create_task", {
+      title,
+      project_id: project.id,
+      due_date: scheduleThis ? dueDate : null,
+      priority: "medium",
+    });
+    const task = taskFrom(result.result);
+    if (!result.success || !task) {
+      failedTitles.push(title);
+      continue;
+    }
+    board.tasks.unshift(task);
+    rememberTask(context, task);
+    createdTasks.push(task);
+  }
+
+  if (createdTasks.length) {
+    blocks.push({
+      type: "tasks",
+      title: project.name,
+      tasks: createdTasks.map((task) => toTaskCard(task, [project!], board.timezone)),
+    });
+    const listed = createdTasks
+      .map((task) =>
+        task.due_date
+          ? `“${task.title}” (due ${formatDateOnly(task.due_date)})`
+          : `“${task.title}”`
+      )
+      .join(", ");
+    notes.push(`added ${createdTasks.length} task(s): ${listed}`);
+  }
+  if (failedTitles.length) {
+    notes.push(`could not create: ${failedTitles.join(", ")}`);
+  }
+
+  const ok = createdTasks.length > 0 || notes.some((note) => /Created project|already exists/.test(note));
+  return {
+    message: `${notes.join("; ")}.${failedTitles.length && createdTasks.length ? " Partial success." : ""}`,
+    blocks,
+    context: ok ? context : context,
   };
 }
 

@@ -438,7 +438,7 @@ describe("local assistant commands", () => {
     expect(ids).toHaveLength(2);
   });
 
-  it("rejects project commands", async () => {
+  it("creates a project by name", async () => {
     const env = harness();
     const result = await runLocalCommand(
       "Create a project called Science Exam Preparation.",
@@ -446,8 +446,55 @@ describe("local assistant commands", () => {
       env.board,
       env.act
     );
-    expect(result.message).toMatch(/aren't available/i);
+    expect(result.message).toMatch(/Created project “Science Exam Preparation”/i);
+    expect(env.calls.some((call) => call.name === "create_project")).toBe(true);
+    expect(result.context.focus?.kind).toBe("project");
+  });
+
+  it("handles multi-part project + tasks + schedule", async () => {
+    const env = harness();
+    const result = await runLocalCommand(
+      "Create a science project, add research and poster design tasks, and schedule the research for Friday.",
+      emptyContext(),
+      env.board,
+      env.act
+    );
+    expect(env.calls.some((call) => call.name === "create_project")).toBe(true);
+    const creates = env.calls.filter((call) => call.name === "create_task");
+    expect(creates.length).toBeGreaterThanOrEqual(2);
+    const research = creates.find((call) =>
+      String(call.args.title).toLowerCase().includes("research")
+    );
+    expect(research?.args.due_date).toBe("2026-10-23");
+    expect(result.message.toLowerCase()).toMatch(/science|research|poster/);
+  });
+
+  it("asks before creating from tentative narration", async () => {
+    const env = harness();
+    const result = await runLocalCommand(
+      "I might do homework tomorrow.",
+      emptyContext(),
+      env.board,
+      env.act
+    );
     expect(env.calls).toHaveLength(0);
+    expect(result.message.toLowerCase()).toMatch(/deciding|save that|leave it/);
+  });
+
+  it("creates from make sure I remember paraphrases", async () => {
+    const env = harness();
+    const result = await runLocalCommand(
+      "Make sure I remember to do homework tomorrow.",
+      emptyContext(),
+      env.board,
+      env.act
+    );
+    const create = env.calls.find((call) => call.name === "create_task");
+    expect(create).toBeTruthy();
+    expect(String(create?.args.title).toLowerCase()).toMatch(/homework/);
+    expect(String(create?.args.title).toLowerCase()).not.toMatch(/remember/);
+    expect(create?.args.due_date).toBe("2026-10-23");
+    expect(result.message.toLowerCase()).toMatch(/created|homework/);
   });
 
   it("asks when a task reference is ambiguous and does not write", async () => {
@@ -483,16 +530,34 @@ describe("local assistant commands", () => {
     expect(confirmed.message.toLowerCase()).not.toContain("removed");
   });
 
-  it("rejects moving tasks into a project", async () => {
+  it("moves matching tasks into the focused project", async () => {
     const env = harness();
+    env.board.tasks.push(
+      task({
+        id: "44444444-4444-4444-8444-444444444430",
+        title: "Science revision notes",
+        due_date: "2026-10-24",
+      }),
+      task({
+        id: "44444444-4444-4444-8444-444444444431",
+        title: "Science revision quiz",
+        due_date: "2026-10-25",
+      })
+    );
+    const project = env.board.projects[0];
     const moved = await runLocalCommand(
       "Move all my science revision tasks into that project.",
-      emptyContext(),
+      {
+        ...emptyContext(),
+        lastProject: { id: project.id, name: project.name },
+        focus: { kind: "project", id: project.id, label: project.name },
+      },
       env.board,
       env.act
     );
-    expect(moved.message).toMatch(/aren't available/i);
-    expect(env.calls).toHaveLength(0);
+    expect(env.calls.some((call) => call.name === "move_tasks_to_project")).toBe(true);
+    expect(moved.message.toLowerCase()).toMatch(/moved/);
+    expect(moved.message).toMatch(/Science revision/i);
   });
 
   it("creates checklists with items and adds to an existing list", async () => {
@@ -539,7 +604,7 @@ describe("local assistant commands", () => {
     expect(env.calls.some((call) => call.name === "delete_checklist")).toBe(true);
   });
 
-  it("rejects creating a project with a deadline", async () => {
+  it("creates a project with a deadline", async () => {
     const env = harness();
     const created = await runLocalCommand(
       "Create a project called Midterms with deadline 2026-11-06",
@@ -547,8 +612,9 @@ describe("local assistant commands", () => {
       env.board,
       env.act
     );
-    expect(created.message).toMatch(/aren't available/i);
-    expect(env.calls).toHaveLength(0);
+    expect(created.message).toMatch(/Created project “Midterms”/i);
+    const call = env.calls.find((item) => item.name === "create_project");
+    expect(call?.args).toMatchObject({ name: "Midterms", deadline: "2026-11-06" });
   });
 
   it("saves a timed meeting without claiming it when the time is ambiguous", async () => {
@@ -576,7 +642,7 @@ describe("local assistant commands", () => {
     expect(String(args?.start_at)).toContain("2026-10-23");
   });
 
-  it("rejects changing a project deadline", async () => {
+  it("changes a project deadline", async () => {
     const env = harness();
     const result = await runLocalCommand(
       "Change the deadline of my history project to next Monday.",
@@ -584,8 +650,11 @@ describe("local assistant commands", () => {
       env.board,
       env.act
     );
-    expect(result.message).toMatch(/aren't available/i);
-    expect(env.calls).toHaveLength(0);
+    expect(env.calls.some((call) => call.name === "update_project")).toBe(true);
+    const update = env.calls.find((call) => call.name === "update_project");
+    expect(update?.args.id).toBe("11111111-1111-4111-8111-111111111111");
+    expect(update?.args.deadline).toBe("2026-10-26");
+    expect(result.message.toLowerCase()).toMatch(/deadline|updated|changed|set/);
   });
 
   it("understands casual create, query, and complete phrasing", async () => {

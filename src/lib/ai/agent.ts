@@ -45,7 +45,7 @@ import {
   PERSISTENCE_RULES,
 } from "./phrasebook";
 import { executeTool, TOOL_DEFINITIONS } from "./tools";
-import type { Task, UserMemory } from "@/types";
+import type { Project, Task, UserMemory } from "@/types";
 import type {
   AgentStep,
   AssistantBlock,
@@ -137,7 +137,9 @@ You understand ordinary human English as flexibly as possible — not a fixed co
 - Questions and lookups ("Did I add milk?", "what task i have tomorrow") → search/query tools. Do NOT create.
 - Prohibitions ("Don't add milk to my list") → do nothing that adds a task; acknowledge.
 - Suggestions / vague narration without a save request → ask briefly if they want it saved, rather than inventing a task.
-- Clear remember/schedule/put-on-list requests → create.
+- Tentative phrasing ("I might…", "maybe I should…", "thinking about…") without an explicit save cue → ask; do NOT create.
+- Clear remember/schedule/put-on-list/"make sure I remember" requests → create.
+- Multi-part requests (create a project, add related tasks, set one deadline) → call tools in a sensible order; report partial success honestly if some steps fail.
 - "I gotta finish X" usually means complete existing work, not create a task titled "finish X".
 - Conditionals ("if I finish X, move it…") → clarify which step to do now.
 - Negation, dates, names, numbers, and priorities must never be silently flipped by spelling repair.
@@ -150,7 +152,7 @@ You understand ordinary human English as flexibly as possible — not a fixed co
 - The UI may already show a subtle "I think you mean …" chip. Do NOT repeat that phrase in your reply. Just confirm the action result (e.g. "Added Homework for tomorrow.").
 - If a date phrase is genuinely ambiguous (e.g. "next weak" could be week), ask a short yes/no question instead of guessing. Do not run destructive tools until clarified.
 
-You help with tasks, checklists, calendar events, and reminders by changing real saved records through tools. This product does not support projects — never create, list, update, delete, or mention projects. Suggest tasks or checklists instead.
+You help with tasks, checklists, projects, calendar events, and reminders by changing real saved records through tools.
 
 User: ${auth.profile.full_name ?? auth.email}
 Timezone: ${timezone}
@@ -162,11 +164,12 @@ ${customInstructions?.trim() ? `\n## User custom instructions\n${customInstructi
 ## Information tiers (critical)
 1. Temporary conversation references below — this chat only (focus, pending asks, recent tasks).
 2. Persistent memory — confirmed preferences/context notes only (see Persistent memory section). Never invent memories.
-3. Application data — tasks, checklists, deadlines, completion status from tools/database. Always authoritative over memory for status.
+3. Application data — tasks, checklists, projects, deadlines, completion status from tools/database. Always authoritative over memory for status.
 ${memoriesSection}
 ## Conversation references (temporary)
 Use these ids; do not invent records. History is trimmed — rely on Focus / last tasks / pending ask, not unlimited chat.
 Focus: ${focus}
+Last project: ${context.lastProject ? `${context.lastProject.name} (${context.lastProject.id})` : "none"}
 Last checklist: ${context.lastChecklist ? `${context.lastChecklist.title} (${context.lastChecklist.id})` : "none"}
 Last turn: ${lastTurnSummary(context.lastTurn)}
 Pending ask (continue without making the user repeat the whole request): ${pendingRequestSummary(context.pendingRequest)}
@@ -190,7 +193,7 @@ ${PERSISTENCE_RULES}
 - Match the user's language and tone when possible. Do not lecture about wording.
 
 ## Hard rules
-1. Never invent a task, event, checklist, deadline, or completion status. If a tool does not return it, it does not exist.
+1. Never invent a task, event, project, checklist, deadline, or completion status. If a tool does not return it, it does not exist.
 2. For any question about today, tomorrow, yesterday, this week, next week, this month, next month, the next 7 days, overdue work, or tasks without deadlines, call query_schedule. Next month means the next calendar month, not the next 30 days.
 3. Do not treat tasks without a deadline as due today. Do not list completed tasks as unfinished.
 4. Resolve pronouns such as "it", "that task", and "the second one" from the conversation references above. If search_records returns several close matches, ask which one. Do not guess.
@@ -323,6 +326,38 @@ function absorbRecord(context: ConversationContext, name: string, result: unknow
       ...(context.lastTasks ?? []).filter((item) => item.id !== task.id),
     ].slice(0, 20);
   }
+  if (name === "create_project" || name === "update_project") {
+    const project = result as Project;
+    if (!project.id || !project.name) return;
+    context.focus = {
+      kind: "project",
+      id: project.id,
+      label: project.name,
+      detail: project.deadline,
+    };
+    context.lastProject = { id: project.id, name: project.name };
+  }
+  if (name === "move_tasks_to_project") {
+    const payload = result as { project?: Project; updated?: Task[] };
+    if (payload.project?.id && payload.project.name) {
+      context.focus = {
+        kind: "project",
+        id: payload.project.id,
+        label: payload.project.name,
+        detail: payload.project.deadline,
+      };
+      context.lastProject = { id: payload.project.id, name: payload.project.name };
+    }
+    if (Array.isArray(payload.updated)) {
+      for (const task of payload.updated.slice(0, 8)) {
+        if (!task.id || !task.title) continue;
+        context.lastTasks = [
+          { id: task.id, title: task.title },
+          ...(context.lastTasks ?? []).filter((item) => item.id !== task.id),
+        ].slice(0, 20);
+      }
+    }
+  }
   if (
     name === "create_checklist" ||
     name === "add_checklist_items" ||
@@ -378,6 +413,10 @@ function toolLabel(name: string): string {
     add_checklist_items: "adding checklist items",
     complete_checklist_items: "completing checklist items",
     delete_checklist: "deleting a checklist",
+    create_project: "creating a project",
+    update_project: "updating a project",
+    delete_project: "deleting a project",
+    move_tasks_to_project: "moving tasks into a project",
     create_event: "saving an event",
     update_event: "updating an event",
     delete_event: "deleting an event",
@@ -570,7 +609,12 @@ export async function runAgent(
     if (agentMode !== "agent") {
       return finish("Switch to Agent mode to confirm deletes. Nothing was changed.");
     }
-    const allowed = new Set(["delete_task", "delete_checklist", "delete_event"]);
+    const allowed = new Set([
+      "delete_task",
+      "delete_checklist",
+      "delete_project",
+      "delete_event",
+    ]);
     if (!allowed.has(options.confirm.tool)) {
       return finish("That confirmation is not for a delete, so I did not change anything.", {
         error: "unsupported_confirm",

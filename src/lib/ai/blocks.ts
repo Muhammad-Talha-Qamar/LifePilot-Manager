@@ -114,6 +114,13 @@ export function scheduleBlocks(
       events: result.events.map(toEventCard),
     });
   }
+  if (result.projects.length) {
+    blocks.push({
+      type: "projects",
+      title: `Project deadlines · ${result.period.label}`,
+      projects: result.projects.map((project) => toProjectCard(project, result.tasks, [])),
+    });
+  }
   return blocks;
 }
 
@@ -147,6 +154,37 @@ export function blocksFromToolCalls(
         type: "tasks",
         title: "Tasks",
         tasks: (call.result as Task[]).map((task) => toTaskCard(task, [], timezone)),
+      });
+      continue;
+    }
+    if (call.name === "move_tasks_to_project") {
+      const payload = call.result as { updated?: Task[]; project?: Project };
+      if (payload.updated?.length) {
+        blocks.push({
+          type: "tasks",
+          title: payload.project?.name ?? "Moved tasks",
+          tasks: payload.updated.map((task) =>
+            toTaskCard(task, payload.project ? [payload.project] : [], timezone)
+          ),
+        });
+      }
+      continue;
+    }
+    if (call.name === "create_project" || call.name === "update_project") {
+      blocks.push({
+        type: "projects",
+        title: "Project",
+        projects: [toProjectCard(call.result as Project, [], [])],
+      });
+      continue;
+    }
+    if (call.name === "list_projects" && Array.isArray(call.result)) {
+      blocks.push({
+        type: "projects",
+        title: "Projects",
+        projects: (call.result as Project[]).map((project) =>
+          toProjectCard(project, [], [])
+        ),
       });
       continue;
     }

@@ -17,6 +17,7 @@ export type StanceKind =
   | "query"
   | "lookup_past"
   | "conditional"
+  | "suggestion"
   | "complete_focus"
   | "command"
   | "smalltalk"
@@ -80,6 +81,29 @@ export function detectStance(raw: string): Stance {
       reason: "conditional / if-then request needs confirmation",
       confidence: 0.85,
     };
+  }
+
+  // Uncertain / tentative narration — not an instruction to save.
+  // "I might do homework tomorrow" must NOT create a task.
+  if (
+    /^(?:i\s+)?(?:might|may|could|maybe|perhaps)\b/i.test(normalized) ||
+    /^(?:i(?:'m| am)\s+)?(?:thinking about|considering|not sure(?:\s+if)?|debating)\b/i.test(
+      normalized
+    ) ||
+    /^(?:maybe|perhaps)\s+i\s+(?:should|could|might|will|can)\b/i.test(normalized)
+  ) {
+    // Explicit save cues still win ("maybe add milk" / "I might as well add …")
+    if (
+      !/\b(?:add|create|put|remind|schedule|save|jot|note|remember|don't forget|do not forget)\b/i.test(
+        normalized
+      )
+    ) {
+      return {
+        kind: "suggestion",
+        reason: "tentative / uncertain narration without save request",
+        confidence: 0.9,
+      };
+    }
   }
 
   // Past lookup: "Did I add milk?" / "Have I already put …"
@@ -178,6 +202,7 @@ export function blocksCreateRewrite(stance: Stance): boolean {
     stance.kind === "query" ||
     stance.kind === "lookup_past" ||
     stance.kind === "conditional" ||
+    stance.kind === "suggestion" ||
     (stance.kind === "complete_focus" && stance.confidence >= 0.8)
   );
 }

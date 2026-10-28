@@ -476,6 +476,11 @@ export function rewriteIntent(input: string): string {
     return stripTrailingPunct(`__clarify_conditional__ ${text}`);
   }
 
+  // Tentative narration ("I might…") — do not invent a create.
+  if (stance.kind === "suggestion") {
+    return stripTrailingPunct(`__clarify_suggestion__ ${text}`);
+  }
+
   // Past lookups ("Did I add milk?") → search-style query, not create.
   if (stance.kind === "lookup_past") {
     const about = text
