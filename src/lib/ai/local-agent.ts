@@ -14,6 +14,7 @@ import {
   toProjectCard,
   toTaskCard,
 } from "./blocks";
+import { interpretUtterance } from "./interpret";
 import { rewriteIntent } from "./intent";
 import {
   cleanPhrase,
@@ -217,18 +218,46 @@ function askAmbiguous(names: string[], noun: string): string {
   return `I found more than one ${noun}: ${names.map((name) => `“${name}”`).join(", ")}. Which one do you mean?`;
 }
 
+function focusedTask(
+  board: Board,
+  context: ConversationContext
+): Task | null {
+  if (context.focus?.kind === "task") {
+    const task = board.tasks.find((item) => item.id === context.focus?.id);
+    if (task) return task;
+  }
+  const recent = context.lastTasks?.[0];
+  if (recent) {
+    const task = board.tasks.find((item) => item.id === recent.id);
+    if (task) return task;
+  }
+  return null;
+}
+
 function resolveTaskPhrase(
   phrase: string,
   board: Board,
   context: ConversationContext
 ): { tasks: Task[] } | { ask: string } | { none: string } {
   const text = normalizeCommand(phrase);
-  if (
-    /\b(it|that task|this task|that one|this one)\b/.test(text) &&
-    context.focus?.kind === "task"
-  ) {
-    const task = board.tasks.find((item) => item.id === context.focus?.id);
+  const pronoun =
+    /^(?:it|that|this|that task|this task|that one|this one)$/.test(text) ||
+    /\b(it|that task|this task|that one|this one)\b/.test(text);
+
+  if (pronoun) {
+    const task = focusedTask(board, context);
     if (task) return { tasks: [task] };
+    if ((context.lastTasks?.length ?? 0) > 1) {
+      return {
+        ask: askAmbiguous(
+          (context.lastTasks ?? []).slice(0, 5).map((item) => item.title),
+          "task"
+        ),
+      };
+    }
+    return {
+      none: "Which task do you mean? Mention its name, or create one first.",
+    };
   }
   if (/\b(those|them|those tasks|these tasks)\b/.test(text) && context.lastTasks?.length) {
     const tasks = context.lastTasks
@@ -249,7 +278,14 @@ function resolveTaskPhrase(
     (task) => `${task.title} ${task.category ?? ""} ${(task.tags ?? []).join(" ")}`
   );
   const picked = pickUnique(ranked);
-  if ("none" in picked) return { none: `I couldn't find a task matching “${cleanPhrase(phrase)}”.` };
+  if ("none" in picked) {
+    // Weak name match + recent focus: prefer the focused task when the phrase is emptyish.
+    if (!cleanPhrase(phrase)) {
+      const task = focusedTask(board, context);
+      if (task) return { tasks: [task] };
+    }
+    return { none: `I couldn't find a task matching “${cleanPhrase(phrase)}”.` };
+  }
   if ("ambiguous" in picked) return { ask: askAmbiguous(picked.ambiguous.map((task) => task.title), "task") };
   return { tasks: [picked.match] };
 }
@@ -507,14 +543,34 @@ export async function runLocalCommand(
     return { message: understood.message, blocks: [], context };
   }
 
-  const rewritten =
+  let rewritten =
     understood.kind === "command"
       ? understood.text
       : rewriteIntent(raw);
+
+  // Recover via phrasebook intent+slots only when we still lack a canonical verb.
+  const rewrittenNorm = normalizeCommand(rewritten);
+  const looksCanonical =
+    /^(?:add|create|make|new|move|mark|delete|complete|finish|show|list|plan|undo|schedule|set|remove|postpone|reschedule|shift)\b/.test(
+      rewrittenNorm
+    ) ||
+    /^(?:no|nope|wait|actually|sorry)\b.+\b(?:i meant|make it|change it)\b/.test(rewrittenNorm) ||
+    /^i meant\b/.test(rewrittenNorm);
+  if (!looksCanonical) {
+    const interpreted = interpretUtterance(raw);
+    if (interpreted.canonical && interpreted.confidence >= 0.22) {
+      rewritten = interpreted.canonical;
+    }
+  }
+
   const workingRaw = rewritten !== raw.trim() ? rewritten : raw;
   const norm = normalizeCommand(workingRaw);
 
-  if (/\bprojects?\b/.test(norm)) {
+  // Only block explicit project create/manage — not every mention of the word.
+  if (
+    /\bprojects?\b/.test(norm) &&
+    /^(?:add|create|make|new|delete|move|list|show|update)\b/.test(norm)
+  ) {
     return {
       message:
         "Projects aren't available in LifePilot. Use a task or checklist instead.",
@@ -528,6 +584,26 @@ export async function runLocalCommand(
   ) || norm.match(/^i meant\s+(.+)$/);
   if (correction) {
     return correctFocused(correction[1], workingRaw, context, board, act);
+  }
+
+  // Short follow-ups with focus: bare date / "friday instead" / "make it friday"
+  if (
+    context.focus?.kind === "task" &&
+    !/^(?:add|create|make|new|show|what|list|delete|plan|mark|complete|finish|schedule)\b/.test(
+      norm
+    )
+  ) {
+    const focusDate =
+      norm.match(/^(?:make it|change it(?: to)?|set it(?: to)?|move it(?: to)?)\s+(.+)$/) ||
+      norm.match(/^(.+)\s+instead$/) ||
+      (/^(today|tonight|tomorrow|yesterday|this \w+|next \w+|monday|tuesday|wednesday|thursday|friday|saturday|sunday)$/.test(
+        norm
+      )
+        ? ([null, norm] as RegExpMatchArray)
+        : null);
+    if (focusDate?.[1]) {
+      return correctFocused(focusDate[1], workingRaw, context, board, act);
+    }
   }
 
   if (context.pending && isYes(norm)) {
@@ -700,10 +776,13 @@ export async function runLocalCommand(
   }
 
   const completeTask = norm.match(
-    /^(?:mark|complete|finish) (.+?)(?: as (?:complete|completed|done))?$/
+    /^(?:mark|complete|finish) (.+?)(?:\s+(?:as\s+)?(?:complete|completed|done))?$/
   );
   if (completeTask && !/checklist/.test(norm)) {
-    const phrase = completeTask[1].replace(/\bas (complete|completed|done)\b/, "");
+    const phrase = completeTask[1]
+      .replace(/\s+as\s+(?:complete|completed|done)\b/g, "")
+      .replace(/\s+(?:complete|completed|done)$/g, "")
+      .trim();
     // Prefer checklist items when the phrase matches an item title.
     const itemHits = board.checklists.flatMap((checklist) =>
       checklist.items
@@ -1345,12 +1424,19 @@ async function createTaskCommand(
   board: Board,
   act: ToolHandler
 ): Promise<LocalCommandResult> {
+  const cleanedRaw = cleanPhrase(raw);
   const match =
-    raw.match(
+    cleanedRaw.match(
       /^(?:please\s+)?(?:add|create|make|new)\s+(?:a\s+)?(?:task\s+)?(?:called\s+|named\s+)?(.+?)(?:\s+(?:for|due|by|on|before)\s+(.+))?$/i
     ) ||
-    raw.match(
+    cleanedRaw.match(
       /^(?:please\s+)?(?:add|create|make|new)\s+(?:a\s+)?(?:task\s+)?(?:called\s+|named\s+)?(.+)$/i
+    ) ||
+    norm.match(
+      /^(?:please\s+)?(?:add|create|make|new)\s+(?:a\s+)?(?:task\s+)?(?:called\s+|named\s+)?(.+?)(?:\s+(?:for|due|by|on|before)\s+(.+))?$/
+    ) ||
+    norm.match(
+      /^(?:please\s+)?(?:add|create|make|new)\s+(?:a\s+)?(?:task\s+)?(?:called\s+|named\s+)?(.+)$/
     );
   let title = cleanPhrase(match?.[1] || "");
   let when = match?.[2] ? normalizeCommand(match[2]) : "";
@@ -1366,8 +1452,11 @@ async function createTaskCommand(
     }
   }
 
-  // Strip leftover "to " from "remind me to …" rewrites that slipped through
-  title = title.replace(/^to\s+/i, "").trim();
+  // Strip leftover "to " / "do my " from remind/need rewrites
+  title = title
+    .replace(/^to\s+/i, "")
+    .replace(/^do\s+(?:my\s+|the\s+)?/i, "")
+    .trim();
 
   if (!title || /^(a )?(checklist|project)\b/i.test(title)) {
     return { message: "What should I call the task?", blocks: [], context };

@@ -57,6 +57,46 @@ export const FEW_SHOT_EXAMPLES: Array<{
     action: "create_task title=dentist due=next week (resolve to a day if needed)",
   },
   {
+    user: "Add homework for tomorrow.",
+    intent: "create_task",
+    action: "create_task title=homework due=tomorrow",
+  },
+  {
+    user: "Put homework on tomorrow's list.",
+    intent: "create_task",
+    action: "create_task title=homework due=tomorrow",
+  },
+  {
+    user: "Can you schedule my homework for tomorrow?",
+    intent: "create_task",
+    action: "create_task title=homework due=tomorrow (schedule+object = create, not query)",
+  },
+  {
+    user: "I need to do my homework tomorrow. Add it to my tasks.",
+    intent: "create_task",
+    action: "create_task title=homework due=tomorrow (use primary obligation clause)",
+  },
+  {
+    user: "make it Friday",
+    intent: "correction",
+    action: "update focused task due_date=Friday; do NOT create duplicate",
+  },
+  {
+    user: "Friday instead",
+    intent: "correction",
+    action: "update focused task due_date=Friday",
+  },
+  {
+    user: "change it to Friday",
+    intent: "reschedule",
+    action: "update focused / pronoun task due_date=Friday",
+  },
+  {
+    user: "finish homework",
+    intent: "complete",
+    action: "search homework → complete_task",
+  },
+  {
     user: "todo: buy milk",
     intent: "create_task",
     action: "create_task title=buy milk",
@@ -338,11 +378,27 @@ export const DECISION_HEURISTICS = `
 - Match the user's language when replying when practical.
 `.trim();
 
-/** Compact few-shot block for system prompt injection. */
-export function fewShotPromptBlock(limit = 28): string {
-  const lines = FEW_SHOT_EXAMPLES.slice(0, limit).map(
-    (ex, i) => `${i + 1}. User: "${ex.user}" → ${ex.action}`
-  );
+/** Compact few-shot block for system prompt injection — sample across intent families. */
+export function fewShotPromptBlock(limit = 36): string {
+  const byIntent = new Map<IntentKind, typeof FEW_SHOT_EXAMPLES>();
+  for (const ex of FEW_SHOT_EXAMPLES) {
+    const list = byIntent.get(ex.intent) ?? [];
+    list.push(ex);
+    byIntent.set(ex.intent, list);
+  }
+  const picked: typeof FEW_SHOT_EXAMPLES = [];
+  const intents = [...byIntent.keys()];
+  let guard = 0;
+  while (picked.length < limit && guard < limit * 3) {
+    for (const intent of intents) {
+      const list = byIntent.get(intent);
+      if (!list?.length) continue;
+      picked.push(list.shift()!);
+      if (picked.length >= limit) break;
+    }
+    guard += 1;
+  }
+  const lines = picked.map((ex, i) => `${i + 1}. User: "${ex.user}" → ${ex.action}`);
   return `## Few-shot understanding examples\n${lines.join("\n")}`;
 }
 

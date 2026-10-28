@@ -124,7 +124,7 @@ ${tasks || "none"}
 ${hintBlock}
 ${INTENT_GLOSSARY}
 
-${fewShotPromptBlock(30)}
+${fewShotPromptBlock(36)}
 
 ${DECISION_HEURISTICS}
 
@@ -160,6 +160,7 @@ function buildNluHint(userMessage: string): string {
     return localInterpretationHint(userMessage, null, "reply");
   }
   if (understood.kind === "command") {
+    // Soft prior only — the model must still verify with tools.
     return localInterpretationHint(userMessage, understood.text, "command");
   }
   const rewritten = rewriteIntent(userMessage);

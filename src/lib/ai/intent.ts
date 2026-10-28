@@ -3,10 +3,16 @@
  * command shapes the local agent already understands.
  */
 
+import { primaryClause } from "./interpret";
 import { normalizeInput } from "./normalize-input";
 
 const DATE_TAIL =
   /(?:today|tonight|tomorrow|yesterday|this\s+\w+|next\s+\w+|(?:mon|tues|wednes|thurs|fri|satur|sun)day|\d{4}-\d{2}-\d{2}|(?:\d{1,2}\s+)?(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:t(?:ember)?)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)(?:\s+\d{1,2}(?:,?\s*\d{4})?)?)/i;
+
+/** Drop trailing sentence punctuation so anchored matchers see clean commands. */
+function stripTrailingPunct(text: string): string {
+  return text.replace(/[.!?…]+$/g, "").replace(/\s+/g, " ").trim();
+}
 
 function stripPolite(text: string): string {
   return text
@@ -29,50 +35,79 @@ function stripPolite(text: string): string {
     .trim();
 }
 
+function tidyCreatePayload(payload: string): string {
+  return payload
+    .replace(/^to\s+/i, "")
+    .replace(/^do\s+(?:my\s+|the\s+)?/i, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
 function rewriteCreates(text: string): string {
   // "remind me to buy milk tomorrow" / "don't forget to …"
   const remind = text.match(
     /^(?:remind me(?: to)?|don'?t forget(?: to)?|do not forget(?: to)?|remember(?: to)?|note(?: to)?|ping me(?: to)?|nudge me(?: to)?|hit me(?: up)?(?: to)?|send me a reminder(?: to)?|set a reminder(?: to)?|make a note(?: to)?)\s+(.+)$/i
   );
-  if (remind) return `add ${remind[1]}`;
+  if (remind) return `add ${tidyCreatePayload(remind[1])}`;
 
   // "i need to / i have to / i should / i gotta …"
   const need = text.match(
     /^(?:i\s+)?(?:need|have|gotta|got|should|must|ought|wanna|want|suppose|supposed|meant)\s+to\s+(.+)$/i
   );
-  if (need) return `add ${need[1]}`;
+  if (need) return `add ${tidyCreatePayload(need[1])}`;
+
+  // "I should do laundry …" (obligation verb without "to")
+  const shouldDo = text.match(
+    /^(?:i\s+)?(?:should|must|oughta)\s+(?!to\b)(.+)$/i
+  );
+  if (shouldDo && !/^(?:add|create|make|show|what|mark|move)\b/i.test(shouldDo[1])) {
+    return `add ${tidyCreatePayload(shouldDo[1])}`;
+  }
 
   // "it'd be good if I …" / "it would help to …"
   const softNeed = text.match(
     /^(?:it(?:'d| would) (?:be )?(?:good|nice|helpful) (?:if i|to)\s+)(.+)$/i
   );
-  if (softNeed) return `add ${softNeed[1]}`;
+  if (softNeed) return `add ${tidyCreatePayload(softNeed[1])}`;
 
   // "better add / better put …"
   const better = text.match(/^(?:better|best)\s+(?:to\s+)?(?:add|put|do)\s+(.+)$/i);
-  if (better) return `add ${better[1]}`;
+  if (better) return `add ${tidyCreatePayload(better[1])}`;
 
   // "put X on my list/todo" / "add X to my list"
   const putOnList = text.match(
     /^(?:put|add|stick|throw|drop|shove)\s+(.+?)\s+(?:on|to|onto|in)\s+(?:my\s+)?(?:list|todo|to-?do|tasks?|reminders?)(?:\s+for\s+(.+))?$/i
   );
   if (putOnList) {
-    return putOnList[2] ? `add ${putOnList[1]} for ${putOnList[2]}` : `add ${putOnList[1]}`;
+    const title = tidyCreatePayload(putOnList[1]);
+    return putOnList[2] ? `add ${title} for ${putOnList[2]}` : `add ${title}`;
+  }
+
+  // "put homework on tomorrow's list" / "put X on Friday list"
+  const putOnDatedList = text.match(
+    new RegExp(
+      `^(?:put|add|stick|throw|drop|shove)\\s+(.+?)\\s+on\\s+(${DATE_TAIL.source})(?:'s)?\\s+(?:list|todo|to-?do|tasks?|agenda)$`,
+      "i"
+    )
+  );
+  if (putOnDatedList) {
+    return `add ${tidyCreatePayload(putOnDatedList[1])} for ${putOnDatedList[2]}`;
   }
 
   // "todo: buy milk" / "task: essay due friday"
   const labeled = text.match(
     /^(?:todo|task|reminder|do|action|follow[- ]?up)\s*[:\-]\s*(.+)$/i
   );
-  if (labeled) return `add ${labeled[1]}`;
+  if (labeled) return `add ${tidyCreatePayload(labeled[1])}`;
 
   // "new task maths homework" / "a new project called …"
   const newThing = text.match(/^a?\s*new\s+(task|project|checklist|event|meeting)\s+(.+)$/i);
   if (newThing) return `create ${newThing[1]} ${newThing[2]}`;
 
-  // "schedule a call with … tomorrow" (not "schedule my day/week")
+  // "schedule a call with … tomorrow" / "schedule my homework for tomorrow"
+  // (not "schedule my day/week" and not bare "my schedule")
   const scheduleThing = text.match(
-    /^schedule\s+(?:a\s+|an\s+)?(.+?)(?:\s+(?:for|on|at)\s+(.+))?$/i
+    /^schedule\s+(?:a\s+|an\s+|my\s+)?(.+?)(?:\s+(?:for|on|at)\s+(.+))?$/i
   );
   if (
     scheduleThing &&
@@ -81,15 +116,14 @@ function rewriteCreates(text: string): string {
       scheduleThing[1].trim()
     )
   ) {
-    return scheduleThing[2]
-      ? `add ${scheduleThing[1]} for ${scheduleThing[2]}`
-      : `add ${scheduleThing[1]}`;
+    const title = tidyCreatePayload(scheduleThing[1]);
+    return scheduleThing[2] ? `add ${title} for ${scheduleThing[2]}` : `add ${title}`;
   }
 
   // "book time for …" / "block time for …"
   const book = text.match(/^(?:book|block)\s+(?:time\s+)?(?:for\s+)?(.+)$/i);
   if (book && !/\b(?:day|week|month)\b/i.test(book[1])) {
-    return `add ${book[1]}`;
+    return `add ${tidyCreatePayload(book[1])}`;
   }
 
   return text;
@@ -101,6 +135,16 @@ function rewriteCompletes(text: string): string {
   );
   if (done && !/^(?:add|create|make|delete|move|show|what|plan)\b/i.test(done[1])) {
     return `mark ${done[1]} complete`;
+  }
+
+  // "finish homework" / "complete the essay" (imperative)
+  const imperative = text.match(/^(?:finish|complete)\s+(.+)$/i);
+  if (
+    imperative &&
+    !/^(?:add|create|make|delete|move|show|what|plan|off)\b/i.test(imperative[1]) &&
+    !/\b(?:checklist|items?)\b/i.test(imperative[1])
+  ) {
+    return `mark ${imperative[1]} complete`;
   }
 
   const checkOff = text.match(
@@ -144,12 +188,23 @@ function rewriteDeletes(text: string): string {
 }
 
 function rewriteQueries(text: string): string {
+  // Verb "schedule X for …" is a create — never treat as a schedule query.
+  if (
+    /^schedule\s+(?:a\s+|an\s+|my\s+)?(?!day\b|today\b|week\b|month\b|morning\b|afternoon\b|evening\b).+/i.test(
+      text
+    )
+  ) {
+    return text;
+  }
+
   // "do i have anything today" / "anything for tomorrow" / "what's on today"
+  // Note: bare "schedule" as a noun only ("my schedule", "schedule?") — not "schedule homework".
   if (
     /^(?:do i have |is there |are there |got |have i got )?(?:anything|any(?:thing)?(?:\s+tasks?)?|what(?:'s| is|s)?(?:\s+on)?|my (?:schedule|agenda|day|plate)|what do i (?:have|need))\b/i.test(
       text
     ) ||
-    /^(?:my )?(?:tasks?|schedule|agenda|workload|plate)\b/i.test(text) ||
+    /^(?:my )?(?:tasks?|agenda|workload|plate)\b/i.test(text) ||
+    /^(?:my\s+)?schedule\??$/i.test(text) ||
     /^(?:show|tell|give)\s+me\b/i.test(text) ||
     /^(?:pull up|bring up|load|open|see)\s+(?:my\s+)?(?:tasks?|list|schedule|agenda|day)\b/i.test(
       text
@@ -237,6 +292,20 @@ function rewriteMoves(text: string): string {
   );
   if (moveDue) return `move ${moveDue[1]} to ${moveDue[2]}`;
 
+  // Focus follow-ups: "make it Friday" / "change it to next week" / "Friday instead"
+  const makeIt = text.match(
+    /^(?:make it|change it(?:\s+to)?|set it(?:\s+to)?|move it(?:\s+to)?)\s+(.+)$/i
+  );
+  if (makeIt) return `move it to ${makeIt[1]}`;
+
+  const instead = text.match(new RegExp(`^(${DATE_TAIL.source})\\s+instead$`, "i"));
+  if (instead) return `move it to ${instead[1]}`;
+
+  const changeDate = text.match(
+    /^(?:change|update|set)\s+(?:the\s+)?(?:date|deadline|due date)\s+to\s+(.+)$/i
+  );
+  if (changeDate) return `move it to ${changeDate[1]}`;
+
   return text;
 }
 
@@ -310,7 +379,11 @@ function rewriteUndo(text: string): string {
 
 /** Canonicalize informal user input before the local command matcher runs. */
 export function rewriteIntent(input: string): string {
-  let text = normalizeInput(input);
+  // Prefer the actionable clause in compound chat before pattern matching.
+  let text = stripTrailingPunct(primaryClause(input));
+  if (!text) {
+    text = stripTrailingPunct(normalizeInput(input));
+  }
   if (!text) return text;
 
   text = stripPolite(text);
@@ -323,5 +396,5 @@ export function rewriteIntent(input: string): string {
   text = rewriteCreates(text);
   text = rewriteBareTask(text);
 
-  return text.replace(/\s+/g, " ").trim();
+  return stripTrailingPunct(text.replace(/\s+/g, " ").trim());
 }

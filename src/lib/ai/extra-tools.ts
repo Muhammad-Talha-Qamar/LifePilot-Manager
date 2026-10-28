@@ -15,9 +15,23 @@ import type { ChecklistItem, Task } from "@/types";
 
 type ToolResult = { success: boolean; result: unknown; error?: string };
 
-async function verifyTask(task: Task, auth: AuthContext): Promise<ToolResult> {
+async function verifyTask(
+  task: Task,
+  auth: AuthContext,
+  expected?: Partial<Pick<Task, "title" | "status" | "due_date" | "priority">>
+): Promise<ToolResult> {
   const verified = await getTask(task.id, auth);
-  if (verified.title !== task.title || verified.status !== task.status) {
+  const titleOk = verified.title === (expected?.title ?? task.title);
+  const statusOk = verified.status === (expected?.status ?? task.status);
+  const dueOk =
+    expected?.due_date === undefined
+      ? verified.due_date === task.due_date
+      : verified.due_date === expected.due_date;
+  const priorityOk =
+    expected?.priority === undefined
+      ? verified.priority === task.priority
+      : verified.priority === expected.priority;
+  if (!titleOk || !statusOk || !dueOk || !priorityOk) {
     return { success: false, result: null, error: "The task write could not be verified." };
   }
   return { success: true, result: verified };
@@ -72,6 +86,28 @@ export async function runExtendedTool(
           kind === "any" || kind === "task" ? await listTasks({ limit: 100 }, auth) : [];
         const checklists =
           kind === "any" || kind === "checklist" ? await listChecklists(auth) : [];
+        const checklistItemMatches =
+          kind === "any" || kind === "checklist"
+            ? (
+                await Promise.all(
+                  checklists.map(async (checklist) => {
+                    const items = await getChecklistItems(checklist.id, auth);
+                    return rankByName(
+                      args.query,
+                      items.filter((item) => !item.is_completed),
+                      (item) => item.title
+                    ).map((row) => ({
+                      kind: "checklist_item" as const,
+                      id: row.item.id,
+                      checklist_id: checklist.id,
+                      checklist_title: checklist.title,
+                      label: row.item.title,
+                      score: row.score,
+                    }));
+                  })
+                )
+              ).flat()
+            : [];
         const matches = [
           ...rankByName(args.query, tasks, (task) => task.title).map((row) => ({
             kind: "task" as const,
@@ -87,6 +123,7 @@ export async function runExtendedTool(
             label: row.item.title,
             score: row.score,
           })),
+          ...checklistItemMatches,
         ]
           .sort((a, b) => b.score - a.score)
           .slice(0, 8);

@@ -64,4 +64,28 @@ describe("rewriteIntent", () => {
       "Move Finish maths homework into Midterms"
     );
   });
+
+  it("treats schedule+object as create, not a schedule query", () => {
+    expect(rewriteIntent("Can you schedule my homework for tomorrow?")).toBe(
+      "add homework for tomorrow"
+    );
+    expect(rewriteIntent("schedule my homework for tomorrow")).toBe(
+      "add homework for tomorrow"
+    );
+  });
+
+  it("understands put X on DATE's list and finish X", () => {
+    expect(rewriteIntent("Put homework on tomorrow's list.")).toBe(
+      "add homework for tomorrow"
+    );
+    expect(rewriteIntent("finish maths homework")).toBe("mark maths homework complete");
+    expect(rewriteIntent("make it Friday")).toBe("move it to Friday");
+    expect(rewriteIntent("Friday instead")).toBe("move it to Friday");
+  });
+
+  it("uses the obligation clause in compound create requests", () => {
+    expect(rewriteIntent("I need to do my homework tomorrow. Add it to my tasks.")).toBe(
+      "add homework tomorrow"
+    );
+  });
 });

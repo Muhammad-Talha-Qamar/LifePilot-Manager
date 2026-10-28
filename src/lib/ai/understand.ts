@@ -7,6 +7,7 @@
  * With OPENAI_API_KEY, the model agent still receives a local paraphrase hint.
  */
 
+import { interpretUtterance } from "./interpret";
 import { rewriteIntent } from "./intent";
 import { normalizeInput } from "./normalize-input";
 
@@ -221,6 +222,16 @@ function softReschedule(text: string): string | null {
   );
   if (changeDate) return `move ${changeDate[1]} to ${changeDate[2]}`;
 
+  const makeIt = text.match(
+    /^(?:make it|change it(?:\s+to)?|set it(?:\s+to)?)\s+(.+)$/i
+  );
+  if (makeIt) return `move it to ${makeIt[1]}`;
+
+  const instead = text.match(
+    /^(today|tonight|tomorrow|yesterday|this\s+\w+|next\s+\w+|(?:mon|tues|wednes|thurs|fri|satur|sun)day)\s+instead$/i
+  );
+  if (instead) return `move it to ${instead[1]}`;
+
   return null;
 }
 
@@ -268,7 +279,7 @@ function conversationalReply(text: string): string | null {
  * Understand everyday user text before the local command matcher runs.
  */
 export function understandInput(raw: string): Understood {
-  const text = normalizeInput(raw);
+  const text = normalizeInput(raw).replace(/[.!?…]+$/g, "").trim();
   if (!text) return { kind: "pass" };
 
   const chat = conversationalReply(text);
@@ -286,9 +297,32 @@ export function understandInput(raw: string): Understood {
 
   const candidate = soft ?? text;
   const rewritten = rewriteIntent(candidate);
+  const rewrittenNorm = rewritten.trim().toLowerCase();
+  const textNorm = text.trim().toLowerCase();
 
-  if (rewritten !== text.trim() || soft) {
+  if (rewrittenNorm !== textNorm || soft) {
     return { kind: "command", text: rewritten };
+  }
+
+  // Already a clear local command or explicit correction — let the matcher handle it.
+  if (
+    /^(?:add|create|make|new|move|mark|delete|complete|finish|show|list|plan|undo|schedule|set|remove)\b/i.test(
+      textNorm
+    ) ||
+    /^(?:no|nope|wait|actually|sorry)\b.+\b(?:i meant|make it|change it)\b/i.test(textNorm) ||
+    /^i meant\b/i.test(textNorm)
+  ) {
+    return { kind: "pass" };
+  }
+
+  // Phrasebook similarity + slot extraction when regex soft/rewrite miss.
+  const interpreted = interpretUtterance(raw);
+  if (
+    interpreted.canonical &&
+    interpreted.confidence >= 0.22 &&
+    !/^move no\b/i.test(interpreted.canonical)
+  ) {
+    return { kind: "command", text: interpreted.canonical };
   }
 
   // If rewriteIntent left it unchanged but it still looks actionable, pass through
