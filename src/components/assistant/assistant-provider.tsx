@@ -28,6 +28,8 @@ import type { Checklist, ChecklistItem, Task } from "@/types";
 
 const STORAGE_KEY = "lifepilot-assistant-v1";
 const INSTRUCTIONS_KEY = "lifepilot-agent-instructions";
+/** Client abort if the stream stalls longer than the server agent budget. */
+const CLIENT_TIMEOUT_MS = 55_000;
 const WRITE_TOOLS = new Set([
   "create_task",
   "update_task",
@@ -74,6 +76,8 @@ interface AssistantApi {
   busy: boolean;
   /** True while waiting for the first visible reply text. */
   thinking: boolean;
+  /** Short live status for the thinking/working indicator. */
+  statusLabel: string | null;
   activity: AgentStep[];
   queueLength: number;
   openaiConfigured: boolean | null;
@@ -82,6 +86,10 @@ interface AssistantApi {
   setAgentMode: (mode: AgentMode) => void;
   customInstructions: string;
   setCustomInstructions: (value: string) => void;
+  /** Ambiguous date options awaiting a tap or typed answer. */
+  pendingClarification: ConversationContext["pendingClarification"];
+  /** Spelling/intent confirm awaiting yes/no. */
+  pendingInterpretation: ConversationContext["pendingInterpretation"];
   send: (text?: string) => Promise<void>;
   regenerate: () => Promise<void>;
   stop: () => void;
@@ -217,6 +225,7 @@ export function AssistantProvider({ children }: { children: React.ReactNode }) {
   const [context, setContext] = useState<ConversationContext>(emptyContext());
   const [busy, setBusy] = useState(false);
   const [thinking, setThinking] = useState(false);
+  const [statusLabel, setStatusLabel] = useState<string | null>(null);
   const [activity, setActivity] = useState<AgentStep[]>([]);
   const [queue, setQueue] = useState<string[]>([]);
   const [openaiConfigured, setOpenaiConfigured] = useState<boolean | null>(null);
@@ -230,6 +239,7 @@ export function AssistantProvider({ children }: { children: React.ReactNode }) {
   const instructionsRef = useRef("");
   const queueRef = useRef<string[]>([]);
   const abortRef = useRef<AbortController | null>(null);
+  const abortReasonRef = useRef<"user" | "timeout" | null>(null);
   const activeAssistantIdRef = useRef<string | null>(null);
   const [ready, setReady] = useState(false);
 
@@ -430,10 +440,14 @@ export function AssistantProvider({ children }: { children: React.ReactNode }) {
       }
 
       const fullText = response.message ?? "";
+      const allBlocks = response.blocks ?? [];
+      // Surface interpretation chips immediately; keep interactive cards until text settles.
+      const earlyBlocks = allBlocks.filter((block) => block.type === "interpretation");
       const useReveal =
         !options?.alreadyStreamedText && fullText.length > 0 && !prefersReducedMotion();
 
       setThinking(false);
+      setStatusLabel(null);
 
       if (useReveal) {
         const outcome = await revealText(
@@ -442,7 +456,7 @@ export function AssistantProvider({ children }: { children: React.ReactNode }) {
             patchAssistant(assistantId, {
               content: partial,
               streaming: true,
-              blocks: [],
+              blocks: earlyBlocks,
             });
           },
           { signal: options?.signal }
@@ -457,7 +471,8 @@ export function AssistantProvider({ children }: { children: React.ReactNode }) {
                 content: hadText
                   ? `${message.content.trimEnd()}${interruptedMessage(true)}`
                   : interruptedMessage(false),
-                blocks: hadText ? response.blocks ?? [] : [],
+                // Only attach result cards when some reply text was already visible.
+                blocks: hadText ? allBlocks : earlyBlocks,
                 streaming: false,
               };
             })
@@ -465,7 +480,7 @@ export function AssistantProvider({ children }: { children: React.ReactNode }) {
         } else {
           patchAssistant(assistantId, {
             content: fullText,
-            blocks: response.blocks ?? [],
+            blocks: allBlocks,
             streaming: false,
           });
         }
@@ -473,12 +488,13 @@ export function AssistantProvider({ children }: { children: React.ReactNode }) {
         // Live stream already showed the text (or reduced motion / empty). Attach final content + cards.
         patchAssistant(assistantId, {
           content: fullText,
-          blocks: response.blocks ?? [],
+          blocks: allBlocks,
           streaming: false,
         });
       }
 
-      if (response.toolCalls?.some((call) => call.success && WRITE_TOOLS.has(call.name))) {
+      const writes = response.toolCalls?.filter((call) => WRITE_TOOLS.has(call.name)) ?? [];
+      if (writes.some((call) => call.success)) {
         notifyDataChanged();
       }
     },
@@ -486,6 +502,7 @@ export function AssistantProvider({ children }: { children: React.ReactNode }) {
   );
 
   const stop = useCallback(() => {
+    abortReasonRef.current = "user";
     abortRef.current?.abort();
     abortRef.current = null;
     const id = activeAssistantIdRef.current;
@@ -506,7 +523,9 @@ export function AssistantProvider({ children }: { children: React.ReactNode }) {
     }
     activeAssistantIdRef.current = null;
     setThinking(false);
+    setStatusLabel(null);
     setBusy(false);
+    setActivity([]);
   }, []);
 
   const drainQueue = useCallback(async () => {
@@ -527,6 +546,7 @@ export function AssistantProvider({ children }: { children: React.ReactNode }) {
     async (payload: Record<string, unknown>, options?: { clearConfirms?: boolean }) => {
       const assistantId = newId();
       activeAssistantIdRef.current = assistantId;
+      abortReasonRef.current = null;
       setMessages((current) => [
         ...current,
         {
@@ -540,6 +560,7 @@ export function AssistantProvider({ children }: { children: React.ReactNode }) {
       ]);
       setBusy(true);
       setThinking(true);
+      setStatusLabel("Thinking…");
       setActivity([]);
 
       const controller = new AbortController();
@@ -547,6 +568,14 @@ export function AssistantProvider({ children }: { children: React.ReactNode }) {
       let receivedDelta = false;
       let donePromise: Promise<void> | null = null;
       let sawTerminalEvent = false;
+      let timedOut = false;
+
+      const timeoutId = window.setTimeout(() => {
+        if (abortRef.current !== controller) return;
+        timedOut = true;
+        abortReasonRef.current = "timeout";
+        controller.abort();
+      }, CLIENT_TIMEOUT_MS);
 
       const enriched = {
         ...payload,
@@ -558,13 +587,16 @@ export function AssistantProvider({ children }: { children: React.ReactNode }) {
         await readSseChat(
           enriched,
           {
-            onStatus: () => {
-              if (!receivedDelta) setThinking(true);
+            onStatus: (status) => {
+              if (receivedDelta) return;
+              setThinking(true);
+              setStatusLabel(status === "working" ? "Working…" : "Thinking…");
             },
             onDelta: (text) => {
               if (!text) return;
               receivedDelta = true;
               setThinking(false);
+              setStatusLabel(null);
               setMessages((current) =>
                 current.map((message) =>
                   message.id === assistantId
@@ -579,6 +611,13 @@ export function AssistantProvider({ children }: { children: React.ReactNode }) {
             },
             onTool: (step) => {
               setThinking(false);
+              setStatusLabel(
+                step.status === "running"
+                  ? step.label
+                  : step.status === "error"
+                    ? "Something failed"
+                    : null
+              );
               setActivity((current) => {
                 const index = current.findIndex(
                   (item) => item.name === step.name && item.status === "running"
@@ -608,10 +647,17 @@ export function AssistantProvider({ children }: { children: React.ReactNode }) {
             onError: (message) => {
               sawTerminalEvent = true;
               setThinking(false);
+              setStatusLabel(null);
               patchAssistant(assistantId, {
                 content: friendlyRequestError(new Error(message)),
                 streaming: false,
-                blocks: [],
+                blocks: [
+                  {
+                    type: "notice",
+                    tone: "error",
+                    text: "That request did not complete. Nothing new was saved.",
+                  },
+                ],
               });
             },
           },
@@ -622,38 +668,81 @@ export function AssistantProvider({ children }: { children: React.ReactNode }) {
           await donePromise;
         } else if (!sawTerminalEvent && !controller.signal.aborted) {
           setThinking(false);
-          patchAssistant(assistantId, { streaming: false });
+          setStatusLabel(null);
+          patchAssistant(assistantId, {
+            content: friendlyRequestError(new Error("The reply ended early.")),
+            streaming: false,
+            blocks: [
+              {
+                type: "notice",
+                tone: "error",
+                text: "The connection closed before a full answer arrived. Nothing new was saved.",
+              },
+            ],
+          });
         }
       } catch (error) {
         if (controller.signal.aborted) {
-          setMessages((current) =>
-            current.map((message) => {
-              if (message.id !== assistantId) return message;
-              if (message.content.includes("stopped here") || message.content.includes("stopped before")) {
-                return { ...message, streaming: false };
-              }
-              const hadText = Boolean(message.content.trim());
-              return {
-                ...message,
-                content: hadText
-                  ? `${message.content.trimEnd()}${interruptedMessage(true)}`
-                  : interruptedMessage(false),
-                streaming: false,
-              };
-            })
-          );
+          const reason = abortReasonRef.current;
+          if (reason === "timeout" || timedOut) {
+            setThinking(false);
+            setStatusLabel(null);
+            patchAssistant(assistantId, {
+              content: friendlyRequestError(
+                new Error("That took too long, so I stopped waiting.")
+              ),
+              streaming: false,
+              blocks: [
+                {
+                  type: "notice",
+                  tone: "error",
+                  text: "Timed out before finishing. Nothing new was saved from this reply.",
+                },
+              ],
+            });
+          } else {
+            setMessages((current) =>
+              current.map((message) => {
+                if (message.id !== assistantId) return message;
+                if (
+                  message.content.includes("stopped here") ||
+                  message.content.includes("stopped before")
+                ) {
+                  return { ...message, streaming: false };
+                }
+                const hadText = Boolean(message.content.trim());
+                return {
+                  ...message,
+                  content: hadText
+                    ? `${message.content.trimEnd()}${interruptedMessage(true)}`
+                    : interruptedMessage(false),
+                  streaming: false,
+                };
+              })
+            );
+          }
         } else {
           setThinking(false);
+          setStatusLabel(null);
           patchAssistant(assistantId, {
             content: friendlyRequestError(error),
             streaming: false,
-            blocks: [],
+            blocks: [
+              {
+                type: "notice",
+                tone: "error",
+                text: "That request failed. Nothing new was saved.",
+              },
+            ],
           });
         }
       } finally {
+        window.clearTimeout(timeoutId);
         if (abortRef.current === controller) abortRef.current = null;
         if (activeAssistantIdRef.current === assistantId) activeAssistantIdRef.current = null;
+        abortReasonRef.current = null;
         setThinking(false);
+        setStatusLabel(null);
         setBusy(false);
         setActivity([]);
         queueMicrotask(() => {
@@ -670,7 +759,11 @@ export function AssistantProvider({ children }: { children: React.ReactNode }) {
       if (!raw) return;
 
       if (busyRef.current) {
-        setQueue((current) => [...current, raw].slice(-8));
+        // Queue follow-ups, but skip an identical consecutive duplicate to avoid double-runs.
+        setQueue((current) => {
+          if (current[current.length - 1] === raw) return current;
+          return [...current, raw].slice(-8);
+        });
         if (!text) setDraft("");
         return;
       }
@@ -811,6 +904,7 @@ export function AssistantProvider({ children }: { children: React.ReactNode }) {
       setDraft,
       busy,
       thinking,
+      statusLabel,
       activity,
       queueLength: queue.length,
       openaiConfigured,
@@ -819,6 +913,8 @@ export function AssistantProvider({ children }: { children: React.ReactNode }) {
       setAgentMode,
       customInstructions,
       setCustomInstructions,
+      pendingClarification: context.pendingClarification ?? null,
+      pendingInterpretation: context.pendingInterpretation ?? null,
       send,
       regenerate,
       stop,
@@ -833,6 +929,7 @@ export function AssistantProvider({ children }: { children: React.ReactNode }) {
       draft,
       busy,
       thinking,
+      statusLabel,
       activity,
       queue.length,
       openaiConfigured,
@@ -840,6 +937,8 @@ export function AssistantProvider({ children }: { children: React.ReactNode }) {
       agentMode,
       customInstructions,
       setCustomInstructions,
+      context.pendingClarification,
+      context.pendingInterpretation,
       send,
       regenerate,
       stop,

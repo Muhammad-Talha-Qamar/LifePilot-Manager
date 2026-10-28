@@ -1084,6 +1084,99 @@ body {
   animation: typing-blink 1.2s infinite, ai-gradient-shift 4s ease infinite;
 }
 
+.ai-stream-caret {
+  width: 2px;
+  height: 1.05em;
+  translate: 0 0.12em;
+  background: linear-gradient(to bottom, var(--ai-violet), var(--ai-cyan));
+  border-radius: 1px;
+  animation: typing-blink 1s steps(1) infinite;
+}
+
+.ai-clarify-bar {
+  border-radius: 0.9rem;
+  border: 1px solid color-mix(in oklab, var(--border) 70%, #fbbf24 30%);
+  background: linear-gradient(
+    120deg,
+    color-mix(in oklab, #fde68a 10%, var(--surface-soft)),
+    color-mix(in oklab, #67e8f9 6%, var(--surface-soft))
+  );
+  padding: 0.7rem 0.85rem;
+  max-width: 100%;
+}
+
+.ai-notice {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  border-radius: 0.85rem;
+  border: 1px solid color-mix(in oklab, var(--border) 80%, transparent);
+  background: var(--surface-soft);
+  padding: 0.65rem 0.8rem;
+  max-width: 100%;
+}
+
+.ai-notice__label {
+  font-size: 0.6875rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--muted-foreground);
+}
+
+.ai-notice__text {
+  font-size: 0.8125rem;
+  line-height: 1.45;
+  color: var(--foreground);
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+@media (min-width: 640px) {
+  .ai-notice__text {
+    font-size: 0.875rem;
+  }
+}
+
+.ai-notice--success {
+  border-color: color-mix(in oklab, var(--border) 55%, #34d399 45%);
+  background: linear-gradient(
+    120deg,
+    color-mix(in oklab, #6ee7b7 12%, var(--surface-soft)),
+    var(--surface-soft)
+  );
+}
+
+.ai-notice--success .ai-notice__label {
+  color: color-mix(in oklab, #047857 70%, var(--foreground));
+}
+
+.ai-notice--error {
+  border-color: color-mix(in oklab, var(--border) 50%, #fb7185 50%);
+  background: linear-gradient(
+    120deg,
+    color-mix(in oklab, #fda4af 12%, var(--surface-soft)),
+    var(--surface-soft)
+  );
+}
+
+.ai-notice--error .ai-notice__label {
+  color: color-mix(in oklab, #be123c 75%, var(--foreground));
+}
+
+.ai-notice--info {
+  border-color: color-mix(in oklab, var(--border) 60%, #67e8f9 40%);
+  background: linear-gradient(
+    120deg,
+    color-mix(in oklab, #67e8f9 10%, var(--surface-soft)),
+    var(--surface-soft)
+  );
+}
+
+.ai-activity {
+  transition: opacity var(--duration-fast) var(--ease-soft);
+}
+
 /* Soft fade into the composer — no hard divider line */
 .ai-composer-dock {
   border-top: none;
@@ -1457,7 +1550,13 @@ body {
   .ai-logo-glow,
   .ai-logo-mark,
   .ai-send-btn,
-  .ai-bg-orbs > span {
+  .ai-bg-orbs > span,
+  .ai-thinking-dot,
+  .ai-stream-caret {
     animation: none !important;
+  }
+
+  .ai-stream-caret {
+    opacity: 0.85;
   }
 }

@@ -172,7 +172,7 @@ export type AssistantBlock =
   | { type: "events"; title: string; events: EventCardData[] }
   | { type: "checklists"; title: string; checklists: ChecklistCardData[] }
   | { type: "projects"; title: string; projects: ProjectCardData[] }
-  | { type: "schedule"; title: string; saved: false; note: string; slots: ScheduleSlot[] }
+  | { type: "schedule"; title: string; saved: boolean; note: string; slots: ScheduleSlot[] }
   | { type: "confirm"; prompt: string; action: PendingAction }
   | { type: "notice"; tone: "info" | "success" | "error"; text: string }
   | {

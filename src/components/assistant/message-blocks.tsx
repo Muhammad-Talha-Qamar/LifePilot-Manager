@@ -57,7 +57,7 @@ export function MessageBlocks({ blocks }: { blocks: AssistantBlock[] }) {
 }
 
 function Block({ block }: { block: AssistantBlock }) {
-  const { send } = useAssistant();
+  const { send, busy } = useAssistant();
 
   if (block.type === "steps") {
     return (
@@ -93,13 +93,14 @@ function Block({ block }: { block: AssistantBlock }) {
 
   if (block.type === "followups") {
     return (
-      <div className="flex flex-wrap gap-1.5 pt-0.5">
+      <div className="flex flex-wrap gap-1.5 pt-0.5" role="group" aria-label="Suggested follow-ups">
         {block.suggestions.map((suggestion) => (
           <button
             key={suggestion}
             type="button"
+            disabled={busy}
             onClick={() => void send(suggestion)}
-            className="ai-suggestion !rounded-lg !px-2.5 !py-1 text-[11px] sm:!rounded-xl sm:text-xs"
+            className="ai-suggestion !rounded-lg !px-2.5 !py-1 text-[11px] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring sm:!rounded-xl sm:text-xs"
           >
             {suggestion}
           </button>
@@ -184,7 +185,17 @@ function Block({ block }: { block: AssistantBlock }) {
   }
   if (block.type === "confirm") return <ConfirmBlock prompt={block.prompt} action={block.action} />;
   if (block.type === "notice") {
-    return <p className="text-sm text-muted-foreground">{block.text}</p>;
+    return (
+      <div
+        className={`ai-notice ai-notice--${block.tone} animate-fade-up`}
+        role={block.tone === "error" ? "alert" : "status"}
+      >
+        <span className="ai-notice__label">
+          {block.tone === "success" ? "Done" : block.tone === "error" ? "Failed" : "Note"}
+        </span>
+        <p className="ai-notice__text">{block.text}</p>
+      </div>
+    );
   }
   if (block.type === "interpretation") {
     return (
@@ -221,14 +232,17 @@ function TaskList({ title, tasks }: { title: string; tasks: TaskCardData[] }) {
 }
 
 function TaskCard({ task }: { task: TaskCardData }) {
-  const { refreshRecords } = useAssistant();
+  const { refreshRecords, busy } = useAssistant();
   const [open, setOpen] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [toggling, setToggling] = useState(false);
   const [title, setTitle] = useState(task.title);
   const [due, setDue] = useState(task.due_date ?? "");
   const [priority, setPriority] = useState(task.priority);
 
   async function toggle(checked: boolean) {
+    if (toggling || busy) return;
+    setToggling(true);
     try {
       await api(`/api/tasks/${task.id}`, {
         method: "PATCH",
@@ -239,10 +253,13 @@ function TaskCard({ task }: { task: TaskCardData }) {
       toast.success(checked ? `Completed “${task.title}”` : `Reopened “${task.title}”`);
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Could not update the task");
+    } finally {
+      setToggling(false);
     }
   }
 
   async function save() {
+    if (saving) return;
     setSaving(true);
     try {
       await api(`/api/tasks/${task.id}`, {
@@ -276,11 +293,17 @@ function TaskCard({ task }: { task: TaskCardData }) {
       <div className="flex min-w-0 items-start gap-2.5 sm:gap-3">
         <Checkbox
           checked={task.status === "done"}
+          disabled={toggling || busy}
           onCheckedChange={(value) => void toggle(value === true)}
           aria-label={`Mark ${task.title} ${task.status === "done" ? "incomplete" : "complete"}`}
+          aria-busy={toggling || undefined}
           className="mt-0.5 h-5 w-5 shrink-0"
         />
-        <button type="button" className="min-w-0 flex-1 text-left" onClick={openEditor}>
+        <button
+          type="button"
+          className="min-w-0 flex-1 rounded-md text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          onClick={openEditor}
+        >
           <p
             className={
               task.status === "done"
@@ -293,6 +316,7 @@ function TaskCard({ task }: { task: TaskCardData }) {
           <p className="mt-0.5 break-words text-xs text-muted-foreground">
             {task.due_date ? formatDateOnly(task.due_date) : "No deadline"}
             {task.due_time ? ` · ${task.due_time.slice(0, 5)}` : ""}
+            {toggling ? " · Updating…" : ""}
           </p>
         </button>
         <div className="flex max-w-[40%] shrink-0 flex-col items-end gap-1">
@@ -303,7 +327,13 @@ function TaskCard({ task }: { task: TaskCardData }) {
         </div>
       </div>
       <div className="mt-1.5 flex justify-end">
-        <Button type="button" variant="ghost" size="sm" className="h-7 text-xs" onClick={openEditor}>
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          className="h-8 min-w-11 text-xs"
+          onClick={openEditor}
+        >
           Edit
         </Button>
       </div>
@@ -363,13 +393,16 @@ function TaskCard({ task }: { task: TaskCardData }) {
 }
 
 function ChecklistCard({ checklist }: { checklist: ChecklistCardData }) {
-  const { refreshRecords } = useAssistant();
+  const { refreshRecords, busy } = useAssistant();
+  const [pendingItem, setPendingItem] = useState<string | null>(null);
   const done = checklist.items.filter((item) => item.is_completed).length;
   const percent = checklist.items.length
     ? Math.round((done / checklist.items.length) * 100)
     : 0;
 
   async function toggle(itemId: string, completed: boolean) {
+    if (pendingItem || busy) return;
+    setPendingItem(itemId);
     try {
       await api(`/api/checklists/${checklist.id}`, {
         method: "PATCH",
@@ -380,8 +413,11 @@ function ChecklistCard({ checklist }: { checklist: ChecklistCardData }) {
       });
       notifyDataChanged();
       await refreshRecords();
+      toast.success(completed ? "Item checked off" : "Item reopened");
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Could not update the checklist item");
+    } finally {
+      setPendingItem(null);
     }
   }
 
@@ -412,8 +448,10 @@ function ChecklistCard({ checklist }: { checklist: ChecklistCardData }) {
           >
             <Checkbox
               checked={item.is_completed}
+              disabled={pendingItem === item.id || busy}
               onCheckedChange={(value) => void toggle(item.id, value === true)}
               aria-label={`${item.is_completed ? "Reopen" : "Complete"} ${item.title}`}
+              aria-busy={pendingItem === item.id || undefined}
               className="mt-0.5 h-5 w-5 shrink-0 sm:mt-0"
             />
             <span
