@@ -86,6 +86,58 @@ const contextSchema = z.object({
     })
     .nullable()
     .optional(),
+  pendingRequest: z
+    .object({
+      kind: z.enum([
+        "reschedule",
+        "complete",
+        "delete",
+        "priority",
+        "show",
+        "update_title",
+        "replay",
+      ]),
+      question: z.string().max(1000),
+      when: z.string().max(200).nullable().optional(),
+      priority: z.string().max(40).nullable().optional(),
+      titleHint: z.string().max(300).nullable().optional(),
+      candidateIds: z.array(z.string().min(1).max(80)).max(20).optional(),
+      replay: z
+        .object({
+          tool: z.string().max(80),
+          templateArgs: z.record(z.string(), z.unknown()),
+          label: z.string().max(300),
+        })
+        .nullable()
+        .optional(),
+    })
+    .nullable()
+    .optional(),
+  lastTurn: z
+    .object({
+      action: z.enum([
+        "create_task",
+        "update_task",
+        "complete_task",
+        "delete_task",
+        "query",
+        "create_checklist",
+        "other",
+      ]),
+      title: z.string().max(300).optional(),
+      dueDate: z.string().max(40).nullable().optional(),
+      categoryHint: z.string().max(80).nullable().optional(),
+      replay: z
+        .object({
+          tool: z.string().max(80),
+          templateArgs: z.record(z.string(), z.unknown()),
+          label: z.string().max(300),
+        })
+        .nullable()
+        .optional(),
+    })
+    .nullable()
+    .optional(),
 });
 
 const bodySchema = z.object({

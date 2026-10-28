@@ -362,10 +362,18 @@ function rewriteMoves(text: string): string {
   if (moveDue) return `move ${moveDue[1]} to ${moveDue[2]}`;
 
   // Focus follow-ups: "make it Friday" / "change it to next week" / "Friday instead"
+  // Do not rewrite non-date follow-ups like "make it shorter" / "make it urgent".
   const makeIt = text.match(
     /^(?:make it|change it(?:\s+to)?|set it(?:\s+to)?|move it(?:\s+to)?)\s+(.+)$/i
   );
-  if (makeIt) return `move it to ${makeIt[1]}`;
+  if (makeIt) {
+    const rest = makeIt[1].trim();
+    if (
+      !/^(?:shorter|longer|urgent|high(?:\s+priority)?|low(?:\s+priority)?|medium)$/i.test(rest)
+    ) {
+      return `move it to ${rest}`;
+    }
+  }
 
   const instead = text.match(new RegExp(`^(${DATE_TAIL.source})\\s+instead$`, "i"));
   if (instead) return `move it to ${instead[1]}`;
@@ -420,12 +428,12 @@ function rewriteBareTask(text: string): string {
 }
 
 function rewritePriority(text: string): string {
-  if (/most urgent|highest priority|make .+ urgent|priorit(?:y|ise|ize)/i.test(text)) {
+  if (/most urgent|highest priority|make .+ urgent|priorit(?:y|ise|ize)|more urgent/i.test(text)) {
     if (/^(?:what(?:'s| is)?|find|get)\s+(?:my\s+)?most urgent/i.test(text)) {
       return "most urgent task priority";
     }
     const makeUrgent = text.match(
-      /^(?:make|set|mark)\s+(.+?)\s+(?:as\s+)?(?:urgent|high priority|highest priority)$/i
+      /^(?:make|set|mark)\s+(.+?)\s+(?:as\s+|more\s+)?(?:urgent|high priority|highest priority)$/i
     );
     if (makeUrgent) return `set ${makeUrgent[1]} urgent`;
   }

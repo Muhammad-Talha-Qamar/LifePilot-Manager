@@ -451,6 +451,14 @@ const NEVER_CORRECT = new Set([
   "hi",
   "yo",
   "sup",
+  // Conversational follow-up words — must not fuzzy into nearby vocab (same→save).
+  "same",
+  "other",
+  "again",
+  "shorter",
+  "longer",
+  "created",
+  "just",
 ]);
 
 /** Explicit high-frequency misspellings (cognitive + typographic). */

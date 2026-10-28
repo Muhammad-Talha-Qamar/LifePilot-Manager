@@ -26,6 +26,44 @@ export interface PendingClarification {
   options: { label: string; date: string }[];
 }
 
+/**
+ * Unresolved action waiting for the user to name a record
+ * (e.g. "Which task should I move to Friday?" → "The science assignment.").
+ */
+export interface PendingRequest {
+  kind: "reschedule" | "complete" | "delete" | "priority" | "show" | "update_title" | "replay";
+  question: string;
+  when?: string | null;
+  priority?: string | null;
+  titleHint?: string | null;
+  candidateIds?: string[];
+  replay?: {
+    tool: string;
+    templateArgs: Record<string, unknown>;
+    label: string;
+  } | null;
+}
+
+/** Snapshot of the last successful conversational action for ellipsis / "do the same". */
+export interface LastTurn {
+  action:
+    | "create_task"
+    | "update_task"
+    | "complete_task"
+    | "delete_task"
+    | "query"
+    | "create_checklist"
+    | "other";
+  title?: string;
+  dueDate?: string | null;
+  categoryHint?: string | null;
+  replay?: {
+    tool: string;
+    templateArgs: Record<string, unknown>;
+    label: string;
+  } | null;
+}
+
 export interface ConversationContext {
   lastProject?: { id: string; name: string } | null;
   lastChecklist?: { id: string; title: string } | null;
@@ -44,6 +82,10 @@ export interface ConversationContext {
     question: string;
     acceptedText: string;
   } | null;
+  /** Action awaiting an entity answer (not a date option list). */
+  pendingRequest?: PendingRequest | null;
+  /** Last successful turn — used for elliptical follow-ups and corrections. */
+  lastTurn?: LastTurn | null;
   undo?: UndoEntry[];
 }
 
@@ -154,5 +196,11 @@ export interface Board {
 }
 
 export function emptyContext(): ConversationContext {
-  return { lastTasks: [], lastItems: [], undo: [] };
+  return {
+    lastTasks: [],
+    lastItems: [],
+    undo: [],
+    pendingRequest: null,
+    lastTurn: null,
+  };
 }

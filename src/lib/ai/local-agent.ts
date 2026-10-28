@@ -18,6 +18,16 @@ import {
   interpretationBlock,
   resolveInterpretation,
 } from "./interpretation";
+import {
+  expandBareCorrection,
+  expandEllipticalCreate,
+  looksLikeEntityAnswer,
+  otherDiscussedTaskId,
+  recordCreateTurn,
+  recordUpdateTurn,
+  shortenTitle,
+  verifyTaskId,
+} from "./conversation-context";
 import { interpretUtterance } from "./interpret";
 import { rewriteIntent } from "./intent";
 import {
@@ -37,6 +47,7 @@ import type {
   Board,
   ConversationContext,
   PendingAction,
+  PendingRequest,
   ScheduleQueryResult,
 } from "./types";
 import { friendlyFailure } from "./user-messages";
@@ -69,7 +80,38 @@ function cloneContext(context: ConversationContext): ConversationContext {
     pending: context.pending ?? null,
     pendingClarification: context.pendingClarification ?? null,
     pendingInterpretation: context.pendingInterpretation ?? null,
+    pendingRequest: context.pendingRequest
+      ? {
+          ...context.pendingRequest,
+          candidateIds: context.pendingRequest.candidateIds
+            ? [...context.pendingRequest.candidateIds]
+            : undefined,
+          replay: context.pendingRequest.replay
+            ? { ...context.pendingRequest.replay, templateArgs: { ...context.pendingRequest.replay.templateArgs } }
+            : null,
+        }
+      : null,
+    lastTurn: context.lastTurn
+      ? {
+          ...context.lastTurn,
+          replay: context.lastTurn.replay
+            ? { ...context.lastTurn.replay, templateArgs: { ...context.lastTurn.replay.templateArgs } }
+            : null,
+        }
+      : null,
   };
+}
+
+function askWhichTask(
+  names: string[],
+  pending: PendingRequest,
+  context: ConversationContext
+): LocalCommandResult {
+  const question =
+    pending.question ||
+    `I found more than one task: ${names.map((name) => `“${name}”`).join(", ")}. Which one do you mean?`;
+  context.pendingRequest = { ...pending, question };
+  return { message: question, blocks: [], context };
 }
 
 function withInterpretation(
@@ -252,8 +294,9 @@ function focusedTask(
     const task = board.tasks.find((item) => item.id === context.focus?.id);
     if (task) return task;
   }
-  const recent = context.lastTasks?.[0];
-  if (recent) {
+  // Only fall back to a single recent task — never silently pick among several.
+  if ((context.lastTasks?.length ?? 0) === 1) {
+    const recent = context.lastTasks![0];
     const task = board.tasks.find((item) => item.id === recent.id);
     if (task) return task;
   }
@@ -280,6 +323,10 @@ function resolveTaskPhrase(
           "task"
         ),
       };
+    }
+    if ((context.lastTasks?.length ?? 0) === 1) {
+      const only = board.tasks.find((item) => item.id === context.lastTasks![0].id);
+      if (only) return { tasks: [only] };
     }
     return {
       none: "Which task do you mean? Mention its name, or create one first.",
@@ -606,7 +653,22 @@ export async function runLocalCommand(
     : raw;
 
   const coreResult = await (async (): Promise<LocalCommandResult> => {
-  const understood = understandInput(inputForNlu);
+  // Continue a pending "which task?" ask before normal NLU.
+  if (context.pendingRequest && looksLikeEntityAnswer(inputForNlu)) {
+    const continued = await continuePendingRequest(inputForNlu, context, board, act);
+    if (continued) return continued;
+  }
+
+  // Context follow-ups that must win over schedule/create rewrites.
+  const earlyContext = await handleContextFollowUps(inputForNlu, context, board, act);
+  if (earlyContext) return earlyContext;
+
+  // Elliptical continuation: "And English for Friday" after a create.
+  const elliptical = expandEllipticalCreate(inputForNlu, context);
+  const bareCorrection = expandBareCorrection(inputForNlu);
+  const nluSeed = elliptical ?? bareCorrection ?? inputForNlu;
+
+  const understood = understandInput(nluSeed);
   if (understood.kind === "reply") {
     return { message: understood.message, blocks: [], context };
   }
@@ -614,7 +676,7 @@ export async function runLocalCommand(
   let rewritten =
     understood.kind === "command"
       ? understood.text
-      : rewriteIntent(inputForNlu);
+      : rewriteIntent(nluSeed);
 
   // Recover via phrasebook intent+slots only when we still lack a canonical verb.
   const rewrittenNorm = normalizeCommand(rewritten);
@@ -625,22 +687,23 @@ export async function runLocalCommand(
     /^(?:no|nope|wait|actually|sorry)\b.+\b(?:i meant|make it|change it)\b/.test(rewrittenNorm) ||
     /^i meant\b/.test(rewrittenNorm);
   if (!looksCanonical) {
-    const interpreted = interpretUtterance(inputForNlu);
+    const interpreted = interpretUtterance(nluSeed);
     if (interpreted.canonical && interpreted.confidence >= 0.22) {
       rewritten = interpreted.canonical;
     }
   }
 
   const workingRaw =
-    rewritten.trim().toLowerCase() !== inputForNlu.trim().toLowerCase()
+    rewritten.trim().toLowerCase() !== nluSeed.trim().toLowerCase()
       ? rewritten
-      : inputForNlu;
+      : nluSeed;
   const norm = normalizeCommand(workingRaw);
 
-  // Only block explicit project create/manage — not every mention of the word.
+  // Only block explicit project create/manage — "show that project again" is handled earlier.
   if (
     /\bprojects?\b/.test(norm) &&
-    /^(?:add|create|make|new|delete|move|list|show|update)\b/.test(norm)
+    /^(?:add|create|make|new|delete|move|list|show|update)\b/.test(norm) &&
+    !(/^(?:show|see|open|display)\b/.test(norm) && /\bagain\b/.test(norm))
   ) {
     return {
       message:
@@ -660,21 +723,30 @@ export async function runLocalCommand(
   // Short follow-ups with focus: bare date / "friday instead" / "make it friday"
   if (
     context.focus?.kind === "task" &&
-    !/^(?:add|create|make|new|show|what|list|delete|plan|mark|complete|finish|schedule)\b/.test(
+    !/^(?:add|create|make|new|show|what|list|delete|plan|mark|complete|finish|schedule|set)\b/.test(
       norm
     )
   ) {
     const focusDate =
       norm.match(/^(?:make it|change it(?: to)?|set it(?: to)?|move it(?: to)?)\s+(.+)$/) ||
       norm.match(/^(.+)\s+instead$/) ||
-      (/^(today|tonight|tomorrow|yesterday|this \w+|next \w+|monday|tuesday|wednesday|thursday|friday|saturday|sunday)$/.test(
+      (/^(today|tonight|tomorrow|yesterday|this \w+|next \w+|monday|tuesday|wednesday|thursday|friday|saturday|sunday|next monday|next tuesday|next wednesday|next thursday|next friday|next saturday|next sunday)$/.test(
         norm
       )
         ? (["", norm] as unknown as RegExpMatchArray)
         : null);
-    if (focusDate?.[1]) {
+    // Refuse non-date "make it …" follow-ups (e.g. leftover "shorter").
+    if (focusDate?.[1] && !/^(?:shorter|longer|urgent|high|low|medium)\b/.test(focusDate[1])) {
       return correctFocused(focusDate[1], workingRaw, context, board, act);
     }
+  }
+
+  // Priority: "set the second task urgent" / "make X more urgent"
+  const prioritySet = norm.match(
+    /^(?:set|make|mark)\s+(.+?)\s+(?:as\s+|more\s+)?(urgent|high priority|high|medium|low priority|low)$/
+  );
+  if (prioritySet) {
+    return setTaskPriority(prioritySet[1], prioritySet[2], context, board, act);
   }
 
   if (context.pending && isYes(norm)) {
@@ -710,6 +782,14 @@ export async function runLocalCommand(
     if (clarified) return clarified;
   } else if (context.pendingClarification) {
     context.pendingClarification = null;
+  }
+
+  // A clear new command abandons an unresolved "which task?" ask.
+  if (
+    context.pendingRequest &&
+    /^(?:add|create|make|new|show|what|list|plan|undo|schedule)\b/.test(norm)
+  ) {
+    context.pendingRequest = null;
   }
 
   if (isUndo(norm)) {
@@ -855,8 +935,13 @@ export async function runLocalCommand(
       };
     }
     rememberTask(context, found.tasks[0]);
+    context.pendingRequest = {
+      kind: "reschedule",
+      question: `Move “${found.tasks[0].title}” to which day? (for example: Friday, tomorrow, next week)`,
+      candidateIds: [found.tasks[0].id],
+    };
     return {
-      message: `Move “${found.tasks[0].title}” to which day? (for example: Friday, tomorrow, next week)`,
+      message: context.pendingRequest.question,
       blocks: [
         {
           type: "tasks",
@@ -1049,6 +1134,185 @@ export async function runLocalCommand(
   return withInterpretation(coreResult, interpBlock);
 }
 
+/**
+ * Multi-turn follow-ups that must run on the raw utterance before schedule/create
+ * rewrites steal phrases like "what about the other…" or "make it shorter".
+ */
+async function handleContextFollowUps(
+  raw: string,
+  context: ConversationContext,
+  board: Board,
+  act: ToolHandler
+): Promise<LocalCommandResult | null> {
+  const norm = normalizeCommand(raw.replace(/[.!?…]+$/g, ""));
+
+  if (/^make it shorter\b/.test(norm) || /^shorten (?:it|that|the title|the task)\b/.test(norm)) {
+    return shortenFocusedTask(context, board, act);
+  }
+
+  if (/^change (?:that|this|it)(?: one)?$/.test(norm)) {
+    const task = focusedTask(board, context);
+    if (!task) {
+      return {
+        message: "Which task should I change, and what should I change about it?",
+        blocks: [],
+        context,
+      };
+    }
+    rememberTask(context, task);
+    context.pendingRequest = {
+      kind: "reschedule",
+      question: `What should I change about “${task.title}” — the date, priority, or title?`,
+    };
+    return {
+      message: context.pendingRequest.question,
+      blocks: [
+        {
+          type: "tasks",
+          title: "Focused task",
+          tasks: [toTaskCard(task, board.projects, board.timezone)],
+        },
+      ],
+      context,
+    };
+  }
+
+  if (
+    /^delete\b/.test(norm) &&
+    /\b(?:just created|we (?:just )?created|you (?:just )?created|last (?:one|task)|that(?: one)?|this(?: one)?|it)\b/.test(
+      norm
+    )
+  ) {
+    const task = focusedTask(board, context);
+    if (task) {
+      const verified = verifyTaskId(task.id, board);
+      if (!verified.ok) return { message: verified.reason, blocks: [], context };
+      return confirm(
+        `Delete “${verified.task.title}”?`,
+        {
+          tool: "delete_task",
+          args: { id: verified.task.id },
+          summary: `Delete “${verified.task.title}”?`,
+        },
+        context
+      );
+    }
+  }
+
+  if (
+    (/\b(?:what about|how about)\b/.test(norm) || /^(?:and|what about)\b/.test(norm)) &&
+    /\b(?:the )?other\b/.test(norm)
+  ) {
+    const otherId = otherDiscussedTaskId(context);
+    const other = otherId ? board.tasks.find((item) => item.id === otherId) : null;
+    if (other) {
+      rememberTask(context, other);
+      return {
+        message: `“${other.title}”${other.due_date ? ` is due ${formatDateOnly(other.due_date)}` : " has no deadline"}${other.status === "done" ? " (already done)" : ""}. Want me to move it, mark it done, or something else?`,
+        blocks: [
+          {
+            type: "tasks",
+            title: "Other task",
+            tasks: [toTaskCard(other, board.projects, board.timezone)],
+          },
+        ],
+        context,
+      };
+    }
+  }
+
+  if (
+    /^(?:show|see|open|display)\b/.test(norm) &&
+    /\b(?:again|that|this|it)\b/.test(norm)
+  ) {
+    if (context.focus?.kind === "task" || (/\btask\b/.test(norm) && context.focus?.kind === "task")) {
+      const id = context.focus?.kind === "task" ? context.focus.id : null;
+      if (id) {
+        const verified = verifyTaskId(id, board);
+        if (verified.ok) {
+          rememberTask(context, verified.task);
+          return {
+            message: `Here’s “${verified.task.title}” again${verified.task.due_date ? `, due ${formatDateOnly(verified.task.due_date)}` : ""}.`,
+            blocks: [
+              {
+                type: "tasks",
+                title: "Focused task",
+                tasks: [toTaskCard(verified.task, board.projects, board.timezone)],
+              },
+            ],
+            context,
+          };
+        }
+      }
+    }
+    if (/\bproject\b/.test(norm) || context.focus?.kind === "project" || context.lastProject) {
+      const project = board.projects.find(
+        (item) =>
+          item.id === (context.focus?.kind === "project" ? context.focus.id : context.lastProject?.id)
+      );
+      if (project) {
+        rememberProject(context, project);
+        return {
+          message: `Here’s “${project.name}” again${project.deadline ? ` (deadline ${formatDateOnly(project.deadline)})` : ""}.`,
+          blocks: [
+            {
+              type: "projects",
+              title: "Focused project",
+              projects: [toProjectCard(project, board.tasks, [])],
+            },
+          ],
+          context,
+        };
+      }
+    }
+    if (context.lastChecklist || context.focus?.kind === "checklist") {
+      const checklist = board.checklists.find(
+        (item) =>
+          item.id ===
+          (context.focus?.kind === "checklist" ? context.focus.id : context.lastChecklist?.id)
+      );
+      if (checklist) {
+        rememberChecklist(context, checklist, checklist.items);
+        return {
+          message: `Here’s checklist “${checklist.title}” again.`,
+          blocks: [
+            {
+              type: "checklists",
+              title: checklist.title,
+              checklists: [toChecklistCard(checklist, checklist.items, board.projects)],
+            },
+          ],
+          context,
+        };
+      }
+    }
+    if (context.focus?.kind === "task") {
+      const verified = verifyTaskId(context.focus.id, board);
+      if (verified.ok) {
+        rememberTask(context, verified.task);
+        return {
+          message: `Here’s “${verified.task.title}” again${verified.task.due_date ? `, due ${formatDateOnly(verified.task.due_date)}` : ""}.`,
+          blocks: [
+            {
+              type: "tasks",
+              title: "Focused task",
+              tasks: [toTaskCard(verified.task, board.projects, board.timezone)],
+            },
+          ],
+          context,
+        };
+      }
+    }
+  }
+
+  const sameFor = norm.match(/^do the same(?:\s+thing)?\s+for\s+(.+)$/);
+  if (sameFor) {
+    return replayLastTurn(sameFor[1], raw, context, board, act);
+  }
+
+  return null;
+}
+
 async function correctFocused(
   phrase: string,
   raw: string,
@@ -1064,12 +1328,26 @@ async function correctFocused(
       context,
     };
   }
+
+  // Priority corrections: "i meant urgent"
+  if (/^(?:more\s+)?(?:urgent|high priority|high|medium|low priority|low)$/i.test(phrase.trim())) {
+    if (focus.kind !== "task") {
+      return { message: "I can only set priority on a task right now.", blocks: [], context };
+    }
+    return setTaskPriority("it", phrase.trim(), context, board, act);
+  }
+
   const resolved = resolveDatePhrase(phrase, board.timezone, board.weekStartsOn, board.now);
   if (resolved?.type === "ambiguous") {
     const soon = resolved.options[0];
     const later = resolved.options[1];
     if (later && focus.detail && soon && focus.detail === soon.date) {
       return correctFocused(later.date, raw, context, board, act);
+    }
+    const verified =
+      focus.kind === "task" ? verifyTaskId(focus.id, board) : ({ ok: true as const });
+    if (focus.kind === "task" && !verified.ok) {
+      return { message: verified.reason, blocks: [], context };
     }
     context.pendingClarification = {
       question: resolved.question,
@@ -1102,12 +1380,16 @@ async function correctFocused(
         context,
       };
     }
-    const result = await act("update_task", { id: focus.id, due_date: resolved.date });
+    const verified = verifyTaskId(focus.id, board);
+    if (!verified.ok) return { message: verified.reason, blocks: [], context };
+    const result = await act("update_task", { id: verified.task.id, due_date: resolved.date });
     const task = taskFrom(result.result);
     if (!result.success || !task || task.due_date !== resolved.date) {
       return { message: failed("change that date", result.error), blocks: [], context };
     }
     rememberTask(context, task);
+    recordUpdateTurn(context, `moved to ${resolved.date}`, { due_date: resolved.date });
+    context.pendingRequest = null;
     return {
       message: `Updated “${task.title}” to ${formatDateOnly(task.due_date)}. I did not create a duplicate.`,
       blocks: [{ type: "tasks", title: "Updated task", tasks: [toTaskCard(task, board.projects, board.timezone)] }],
@@ -1115,8 +1397,10 @@ async function correctFocused(
     };
   }
   if (focus.kind === "task") {
+    const verified = verifyTaskId(focus.id, board);
+    if (!verified.ok) return { message: verified.reason, blocks: [], context };
     const title = cleanPhrase(raw.match(/meant\s+(.+)$/i)?.[1] ?? phrase);
-    const result = await act("update_task", { id: focus.id, title });
+    const result = await act("update_task", { id: verified.task.id, title });
     const task = taskFrom(result.result);
     if (!result.success || !task) return { message: failed("rename that task", result.error), blocks: [], context };
     rememberTask(context, task);
@@ -1127,6 +1411,380 @@ async function correctFocused(
     };
   }
   return { message: "I couldn't tell what to change, so I left your data as it is.", blocks: [], context };
+}
+
+function normalizePriorityLabel(raw: string): "urgent" | "high" | "medium" | "low" {
+  const n = normalizeCommand(raw);
+  if (/urgent/.test(n)) return "urgent";
+  if (/high/.test(n)) return "high";
+  if (/low/.test(n)) return "low";
+  return "medium";
+}
+
+async function setTaskPriority(
+  subject: string,
+  priorityRaw: string,
+  context: ConversationContext,
+  board: Board,
+  act: ToolHandler
+): Promise<LocalCommandResult> {
+  const priority = normalizePriorityLabel(priorityRaw);
+  const found = resolveTaskPhrase(subject, board, context);
+  if ("ask" in found) {
+    return askWhichTask(
+      // Prefer lastTasks titles when available
+      (context.lastTasks ?? []).slice(0, 5).map((item) => item.title),
+      {
+        kind: "priority",
+        question: found.ask,
+        priority,
+        candidateIds: (context.lastTasks ?? []).map((item) => item.id),
+      },
+      context
+    );
+  }
+  if ("none" in found) {
+    context.pendingRequest = {
+      kind: "priority",
+      question: `Which task should I set to ${priority}?`,
+      priority,
+    };
+    return { message: context.pendingRequest.question, blocks: [], context };
+  }
+  const target = found.tasks[0];
+  const verified = verifyTaskId(target.id, board);
+  if (!verified.ok) return { message: verified.reason, blocks: [], context };
+  if (verified.task.priority === priority) {
+    rememberTask(context, verified.task);
+    return {
+      message: `“${verified.task.title}” is already ${priority}.`,
+      blocks: [
+        {
+          type: "tasks",
+          title: "Priority",
+          tasks: [toTaskCard(verified.task, board.projects, board.timezone)],
+        },
+      ],
+      context,
+    };
+  }
+  const result = await act("update_task", { id: verified.task.id, priority });
+  const task = taskFrom(result.result);
+  if (!result.success || !task || task.priority !== priority) {
+    return { message: failed(`set “${verified.task.title}” to ${priority}`, result.error), blocks: [], context };
+  }
+  rememberTask(context, task);
+  recordUpdateTurn(context, `priority ${priority}`, { priority });
+  context.pendingRequest = null;
+  return {
+    message: `Set “${task.title}” to ${priority}.`,
+    blocks: [{ type: "tasks", title: "Priority updated", tasks: [toTaskCard(task, board.projects, board.timezone)] }],
+    context,
+  };
+}
+
+async function shortenFocusedTask(
+  context: ConversationContext,
+  board: Board,
+  act: ToolHandler
+): Promise<LocalCommandResult> {
+  const focus = focusedTask(board, context);
+  if (!focus) {
+    return {
+      message: "Which task should I shorten the title of?",
+      blocks: [],
+      context,
+    };
+  }
+  const verified = verifyTaskId(focus.id, board);
+  if (!verified.ok) return { message: verified.reason, blocks: [], context };
+  const next = shortenTitle(verified.task.title);
+  if (next === verified.task.title) {
+    return {
+      message: `“${verified.task.title}” is already short. Tell me the exact title you want.`,
+      blocks: [
+        {
+          type: "tasks",
+          title: "Focused task",
+          tasks: [toTaskCard(verified.task, board.projects, board.timezone)],
+        },
+      ],
+      context,
+    };
+  }
+  const result = await act("update_task", { id: verified.task.id, title: next });
+  const task = taskFrom(result.result);
+  if (!result.success || !task) return { message: failed("shorten that title", result.error), blocks: [], context };
+  rememberTask(context, task);
+  return {
+    message: `Shortened the title to “${task.title}”.`,
+    blocks: [{ type: "tasks", title: "Updated task", tasks: [toTaskCard(task, board.projects, board.timezone)] }],
+    context,
+  };
+}
+
+async function continuePendingRequest(
+  raw: string,
+  context: ConversationContext,
+  board: Board,
+  act: ToolHandler
+): Promise<LocalCommandResult | null> {
+  const pending = context.pendingRequest;
+  if (!pending) return null;
+
+  const answer = cleanPhrase(raw);
+  // Pending "change that one" without when — treat date/priority answers specially.
+  if (pending.kind === "reschedule" && !pending.when) {
+    if (/priority|urgent|high|low|medium/i.test(answer)) {
+      context.pendingRequest = null;
+      return setTaskPriority("it", answer, context, board, act);
+    }
+    if (/title|name|rename|shorter/i.test(answer)) {
+      context.pendingRequest = null;
+      if (/shorter/i.test(answer)) return shortenFocusedTask(context, board, act);
+      return {
+        message: "What should I rename it to?",
+        blocks: [],
+        context: {
+          ...context,
+          pendingRequest: {
+            kind: "update_title",
+            question: "What should I rename it to?",
+          },
+        },
+      };
+    }
+    const asDate = resolveDatePhrase(answer, board.timezone, board.weekStartsOn, board.now);
+    if (asDate?.type === "day") {
+      context.pendingRequest = null;
+      return correctFocused(asDate.date, raw, context, board, act);
+    }
+  }
+
+  if (pending.kind === "update_title") {
+    const focus = focusedTask(board, context);
+    if (!focus) return null;
+    const verified = verifyTaskId(focus.id, board);
+    if (!verified.ok) return { message: verified.reason, blocks: [], context };
+    const title = titleCase(cleanPhrase(answer));
+    context.pendingRequest = null;
+    const result = await act("update_task", { id: verified.task.id, title });
+    const task = taskFrom(result.result);
+    if (!result.success || !task) return { message: failed("rename that task", result.error), blocks: [], context };
+    rememberTask(context, task);
+    return {
+      message: `Renamed to “${task.title}”.`,
+      blocks: [{ type: "tasks", title: "Updated task", tasks: [toTaskCard(task, board.projects, board.timezone)] }],
+      context,
+    };
+  }
+
+  const found = resolveTaskPhrase(answer, board, context);
+  if ("ask" in found) {
+    context.pendingRequest = {
+      ...pending,
+      question: found.ask,
+    };
+    return { message: found.ask, blocks: [], context };
+  }
+  if ("none" in found) {
+    // Keep pending — ask again rather than inventing a target.
+    return {
+      message: `${found.none} ${pending.question}`,
+      blocks: [],
+      context,
+    };
+  }
+
+  const target = found.tasks[0];
+  const verified = verifyTaskId(target.id, board);
+  if (!verified.ok) return { message: verified.reason, blocks: [], context };
+  rememberTask(context, verified.task);
+  context.pendingRequest = null;
+
+  if (pending.kind === "reschedule" && pending.when) {
+    return reschedule(verified.task.title, pending.when, raw, context, board, act);
+  }
+  if (pending.kind === "priority" && pending.priority) {
+    return setTaskPriority(verified.task.title, pending.priority, context, board, act);
+  }
+  if (pending.kind === "complete") {
+    const result = await act("complete_task", { id: verified.task.id });
+    const task = taskFrom(result.result);
+    if (!result.success || !task || task.status !== "done") {
+      return { message: failed(`complete “${verified.task.title}”`, result.error), blocks: [], context };
+    }
+    rememberTask(context, task);
+    return {
+      message: `Marked “${task.title}” complete.`,
+      blocks: [{ type: "tasks", title: "Completed", tasks: [toTaskCard(task, board.projects, board.timezone)] }],
+      context,
+    };
+  }
+  if (pending.kind === "delete") {
+    return confirm(
+      `Delete “${verified.task.title}”?`,
+      {
+        tool: "delete_task",
+        args: { id: verified.task.id },
+        summary: `Delete “${verified.task.title}”?`,
+      },
+      context
+    );
+  }
+  if (pending.kind === "replay" && pending.replay) {
+    return applyReplayToTask(verified.task, pending.replay, context, board, act);
+  }
+  if (pending.kind === "show") {
+    return {
+      message: `Here’s “${verified.task.title}”${verified.task.due_date ? `, due ${formatDateOnly(verified.task.due_date)}` : ""}.`,
+      blocks: [
+        {
+          type: "tasks",
+          title: "Matched task",
+          tasks: [toTaskCard(verified.task, board.projects, board.timezone)],
+        },
+      ],
+      context,
+    };
+  }
+
+  // Reschedule without when: user named the task after "move which?"
+  if (pending.kind === "reschedule" && !pending.when) {
+    return {
+      message: `Move “${verified.task.title}” to which day?`,
+      blocks: [
+        {
+          type: "tasks",
+          title: "Task to reschedule",
+          tasks: [toTaskCard(verified.task, board.projects, board.timezone)],
+        },
+      ],
+      context,
+    };
+  }
+
+  return null;
+}
+
+async function applyReplayToTask(
+  task: Task,
+  replay: NonNullable<PendingRequest["replay"]>,
+  context: ConversationContext,
+  board: Board,
+  act: ToolHandler
+): Promise<LocalCommandResult> {
+  const verified = verifyTaskId(task.id, board);
+  if (!verified.ok) return { message: verified.reason, blocks: [], context };
+
+  if (replay.tool === "update_task") {
+    const args = { ...replay.templateArgs, id: verified.task.id };
+    const result = await act("update_task", args);
+    const updated = taskFrom(result.result);
+    if (!result.success || !updated) {
+      return { message: failed(`update “${verified.task.title}”`, result.error), blocks: [], context };
+    }
+    rememberTask(context, updated);
+    recordUpdateTurn(context, replay.label, replay.templateArgs);
+    return {
+      message: `Updated “${updated.title}” the same way (${replay.label}).`,
+      blocks: [{ type: "tasks", title: "Updated task", tasks: [toTaskCard(updated, board.projects, board.timezone)] }],
+      context,
+    };
+  }
+
+  if (replay.tool === "create_task") {
+    const category = context.lastTurn?.categoryHint;
+    let title = task.title;
+    // Subject was a fragment — build title like prior create.
+    if (category && !new RegExp(`\\b${category}\\b`, "i").test(title)) {
+      title = titleCase(`${cleanPhrase(title)} ${category}`);
+    }
+    return createTaskCommand(
+      `Add ${title}${replay.templateArgs.due_date ? ` for ${replay.templateArgs.due_date}` : ""}`,
+      `add ${normalizeCommand(title)}${replay.templateArgs.due_date ? ` for ${replay.templateArgs.due_date}` : ""}`,
+      context,
+      board,
+      act
+    );
+  }
+
+  return {
+    message: "I'm not sure how to repeat that action on another item. Tell me exactly what to do.",
+    blocks: [],
+    context,
+  };
+}
+
+async function replayLastTurn(
+  subjectRaw: string,
+  raw: string,
+  context: ConversationContext,
+  board: Board,
+  act: ToolHandler
+): Promise<LocalCommandResult> {
+  const last = context.lastTurn;
+  if (!last?.replay) {
+    return {
+      message: "I'm not sure which action to repeat. Tell me what you want done.",
+      blocks: [],
+      context,
+    };
+  }
+
+  const subject = cleanPhrase(subjectRaw);
+  // "my other project/task/assignment"
+  if (/^(?:my\s+)?(?:the\s+)?other\b/i.test(subject)) {
+    const otherId = otherDiscussedTaskId(context);
+    const other = otherId ? board.tasks.find((item) => item.id === otherId) : null;
+    if (!other) {
+      context.pendingRequest = {
+        kind: "replay",
+        question: "Which other task should I apply that to?",
+        replay: last.replay,
+      };
+      return { message: context.pendingRequest.question, blocks: [], context };
+    }
+    return applyReplayToTask(other, last.replay, context, board, act);
+  }
+
+  // Creating another similar item: "do the same for English"
+  if (last.action === "create_task" && last.replay.tool === "create_task") {
+    const elliptical = expandEllipticalCreate(`and ${subject}`, context);
+    if (elliptical) {
+      return createTaskCommand(elliptical, normalizeCommand(elliptical), context, board, act);
+    }
+  }
+
+  const found = resolveTaskPhrase(subject, board, context);
+  if ("ask" in found) {
+    return askWhichTask(
+      (context.lastTasks ?? []).slice(0, 5).map((item) => item.title),
+      {
+        kind: "replay",
+        question: found.ask,
+        replay: last.replay,
+        candidateIds: (context.lastTasks ?? []).map((item) => item.id),
+      },
+      context
+    );
+  }
+  if ("none" in found) {
+    // Treat as a new create subject when last turn was create.
+    if (last.action === "create_task") {
+      const elliptical = expandEllipticalCreate(`and ${subject}`, context);
+      if (elliptical) {
+        return createTaskCommand(elliptical, normalizeCommand(elliptical), context, board, act);
+      }
+    }
+    context.pendingRequest = {
+      kind: "replay",
+      question: `Which task should I ${last.replay.label} for?`,
+      replay: last.replay,
+    };
+    return { message: `${found.none} ${context.pendingRequest.question}`, blocks: [], context };
+  }
+  return applyReplayToTask(found.tasks[0], last.replay, context, board, act);
 }
 
 async function applyClarification(
@@ -1245,14 +1903,39 @@ async function reschedule(
         context,
       };
     }
-    return { message: "ask" in found ? found.ask : found.none, blocks: [], context };
+    if ("ask" in found) {
+      context.pendingRequest = {
+        kind: "reschedule",
+        question: found.ask.includes("Which")
+          ? found.ask.replace(/\?$/, "") + ` to move to ${cleanPhrase(when)}?`
+          : `Which task should I move to ${cleanPhrase(when)}?`,
+        when: cleanPhrase(when),
+        candidateIds: (context.lastTasks ?? []).map((item) => item.id),
+      };
+      return { message: context.pendingRequest.question, blocks: [], context };
+    }
+    // Uncertain reference — never mutate.
+    context.pendingRequest = {
+      kind: "reschedule",
+      question: `Which task should I move to ${cleanPhrase(when)}?`,
+      when: cleanPhrase(when),
+    };
+    return {
+      message: `${found.none} ${context.pendingRequest.question}`,
+      blocks: [],
+      context,
+    };
   }
-  const result = await act("update_task", { id: found.tasks[0].id, due_date: resolved.date });
+  const verified = verifyTaskId(found.tasks[0].id, board);
+  if (!verified.ok) return { message: verified.reason, blocks: [], context };
+  const result = await act("update_task", { id: verified.task.id, due_date: resolved.date });
   const task = taskFrom(result.result);
   if (!result.success || !task || task.due_date !== resolved.date) {
-    return { message: failed(`move “${found.tasks[0].title}”`, result.error), blocks: [], context };
+    return { message: failed(`move “${verified.task.title}”`, result.error), blocks: [], context };
   }
   rememberTask(context, task);
+  recordUpdateTurn(context, `moved to ${resolved.date}`, { due_date: resolved.date });
+  context.pendingRequest = null;
   return {
     message: `Moved “${task.title}” to ${formatDateOnly(task.due_date)}.`,
     blocks: [{ type: "tasks", title: "Updated task", tasks: [toTaskCard(task, board.projects, board.timezone)] }],
@@ -1643,6 +2326,8 @@ async function createTaskCommand(
   const task = taskFrom(result.result);
   if (!result.success || !task) return { message: failed("create that task", result.error), blocks: [], context };
   rememberTask(context, task);
+  recordCreateTurn(context, task.title, task.due_date);
+  context.pendingRequest = null;
   return {
     message: `Created task “${task.title}”${task.due_date ? ` due ${formatDateOnly(task.due_date)}` : " with no deadline"}.`,
     blocks: [{ type: "tasks", title: "Created", tasks: [toTaskCard(task, board.projects, board.timezone)] }],

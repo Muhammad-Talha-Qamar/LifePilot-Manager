@@ -389,7 +389,12 @@ function extractSlots(family: IntentKind, clause: string): Interpreted["slots"] 
     const makeIt = clause.match(
       /^(?:make it|change it(?: to)?|set it(?: to)?|move it(?: to)?)\s+(.+)$/i
     );
-    if (makeIt) {
+    if (
+      makeIt &&
+      !/^(?:shorter|longer|urgent|high(?:\s+priority)?|low(?:\s+priority)?|medium)$/i.test(
+        makeIt[1].trim()
+      )
+    ) {
       return { subject: "it", when: makeIt[1].trim(), pronoun: true };
     }
     const instead = clause.match(new RegExp(`^(${DATE_HINT.source})\\s+instead$`, "i"));

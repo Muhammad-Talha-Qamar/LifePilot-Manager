@@ -290,6 +290,46 @@ export const FEW_SHOT_EXAMPLES: Array<{
     action: "update focused record priority",
   },
   {
+    user: "Actually, Friday.",
+    intent: "correction",
+    action: "update focused task due_date=Friday; do NOT create duplicate",
+  },
+  {
+    user: "And English for Friday.",
+    intent: "create_task",
+    action: "elliptical create: reuse prior category (e.g. assignment) + Friday",
+  },
+  {
+    user: "Make the second task more urgent.",
+    intent: "priority",
+    action: "update lastTasks[1] priority=urgent",
+  },
+  {
+    user: "Delete the task we just created.",
+    intent: "delete",
+    action: "confirm delete of focused/last-created task",
+  },
+  {
+    user: "The science assignment.",
+    intent: "correction",
+    action: "answer pending ask (e.g. which task to move) — finish pending request",
+  },
+  {
+    user: "What about the other assignment?",
+    intent: "query_schedule",
+    action: "surface the other recently discussed task — do not invent",
+  },
+  {
+    user: "Make it shorter.",
+    intent: "correction",
+    action: "shorten focused task title — not a date move",
+  },
+  {
+    user: "Do the same for my other project.",
+    intent: "reschedule",
+    action: "replay last turn on the other discussed task; ask if ambiguous",
+  },
+  {
     user: "delete the duplicate",
     intent: "delete",
     action: "ask confirm → delete_task confirmed",
@@ -416,6 +456,10 @@ export const DECISION_HEURISTICS = `
 - "List:" or comma-separated shopping/packing items → checklist, not one task.
 - "Schedule my day/week" → plan/query; "schedule a call with …" → create task or event.
 - Pronouns (it / that / the second one) → conversation focus / lastTasks; search_records if unsure.
+- Ellipsis ("And English for Friday") → continue last create with category + new date.
+- Corrections ("Actually, Friday") → update focus; never duplicate.
+- Pending ask + short answer ("The science assignment") → finish the pending action.
+- Uncertain "that task" with multiple matches → ask which one; do not mutate until sure.
 - Relative dates → resolve_date or query_schedule; next month = next calendar month.
 - Tasks without deadlines are NOT due today.
 - Completed tasks are never listed as still open.
