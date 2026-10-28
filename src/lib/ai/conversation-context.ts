@@ -38,6 +38,12 @@ export function pruneContext(context: ConversationContext): ConversationContext 
     pendingInterpretation: context.pendingInterpretation ?? null,
     pendingRequest: context.pendingRequest ?? null,
     lastTurn: context.lastTurn ?? null,
+    lastPlan: context.lastPlan
+      ? {
+          ...context.lastPlan,
+          slots: (context.lastPlan.slots ?? []).slice(0, 24),
+        }
+      : null,
   };
 }
 

@@ -84,6 +84,28 @@ describe("understandInput", () => {
     });
   });
 
+  it("understands informal planning requests", () => {
+    expect(understandInput("Help me plan tomorrow.")).toEqual({
+      kind: "command",
+      text: "plan my tomorrow",
+    });
+    expect(understandInput("What should I work on first?")).toEqual({
+      kind: "command",
+      text: "what should I work on first",
+    });
+    expect(understandInput("I've got too much to do this week.")).toEqual({
+      kind: "command",
+      text: "too much to do this week",
+    });
+    expect(understandInput("What's coming up?")).toEqual({
+      kind: "command",
+      text: "what's coming up",
+    });
+    expect(understandInput("Break this into smaller steps.")).toMatchObject({
+      kind: "command",
+    });
+  });
+
   it("normalizes typos before understanding", () => {
     expect(understandInput("remind me to call mom tommorow")).toEqual({
       kind: "command",

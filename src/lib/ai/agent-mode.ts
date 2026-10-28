@@ -156,6 +156,8 @@ export function suggestFollowUps(input: {
     tips.push("Undo that");
   } else if (tools.has("query_schedule")) {
     tips.push("Plan my day");
+    tips.push("What should I work on first?");
+    tips.push("What's coming up?");
     tips.push("Show overdue");
     tips.push("Remind me to review this tomorrow");
   } else if (tools.has("undo_last_change")) {
@@ -164,6 +166,8 @@ export function suggestFollowUps(input: {
   } else {
     tips.push("What's left today?");
     tips.push("Plan my day");
+    tips.push("What should I work on first?");
+    tips.push("What's coming up?");
     tips.push("/plan organize my week");
   }
 

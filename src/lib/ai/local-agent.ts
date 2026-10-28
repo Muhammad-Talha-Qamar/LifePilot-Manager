@@ -1,6 +1,7 @@
 import { formatInTimeZone, fromZonedTime } from "date-fns-tz";
 import type { CalendarEvent, ChecklistItem, Project, Task, UserMemory } from "@/types";
 import {
+  addCalendarDays,
   calendarToday,
   detectPeriodKind,
   formatDateOnly,
@@ -43,6 +44,20 @@ import {
 } from "./match";
 import { understandInput } from "./understand";
 import { detectMemoryIntent } from "./memory";
+import {
+  applyPlanFollowUp,
+  buildDayPlan,
+  buildPeriodPlan,
+  describePlan,
+  feasibilityBefore,
+  planToBlock,
+  planningStyleFromBoard,
+  rankTasksForPlanning,
+  storePlanInContext,
+  suggestBreakdown,
+  todayInBoard,
+  type SuggestedPlan,
+} from "./planning";
 import type {
   AssistantBlock,
   Board,
@@ -247,6 +262,12 @@ function cloneContext(context: ConversationContext): ConversationContext {
           replay: context.lastTurn.replay
             ? { ...context.lastTurn.replay, templateArgs: { ...context.lastTurn.replay.templateArgs } }
             : null,
+        }
+      : null,
+    lastPlan: context.lastPlan
+      ? {
+          ...context.lastPlan,
+          slots: context.lastPlan.slots.map((slot) => ({ ...slot })),
         }
       : null,
   };
@@ -718,37 +739,65 @@ function describeSchedule(result: ScheduleQueryResult, workload: boolean): strin
   return lines.join("\n");
 }
 
-function buildPlan(
+function dayPlanFromSchedule(
   schedule: ScheduleQueryResult,
+  board: Board,
+  preferProjectId?: string | null
+): SuggestedPlan {
+  const day =
+    schedule.period.from ??
+    schedule.period.to ??
+    todayInBoard(board);
+  return buildDayPlan({
+    tasks: schedule.tasks,
+    overdueTasks: schedule.overdue_tasks,
+    events: schedule.events,
+    projects: board.projects,
+    day,
+    periodLabel: schedule.period.label,
+    timezone: board.timezone,
+    workStart: board.workStart,
+    workEnd: board.workEnd,
+    defaultDuration: board.defaultDuration,
+    planningStyle: planningStyleFromBoard(board),
+    preferProjectId,
+  });
+}
+
+function periodPlanFromSchedule(
+  schedule: ScheduleQueryResult,
+  board: Board,
+  horizon: "week" | "month" | "priority",
+  preferProjectId?: string | null
+): SuggestedPlan {
+  return buildPeriodPlan({
+    tasks: schedule.tasks,
+    overdueTasks: schedule.overdue_tasks,
+    projects: [...board.projects, ...schedule.projects],
+    events: schedule.events,
+    today: todayInBoard(board),
+    periodLabel: schedule.period.label,
+    periodKind: (schedule.period.kind as import("@/lib/utils/dates").PeriodKind) || "this_week",
+    horizon,
+    defaultDuration: board.defaultDuration,
+    planningStyle: planningStyleFromBoard(board),
+    preferProjectId,
+  });
+}
+
+async function respondWithPlan(
+  plan: SuggestedPlan,
+  schedule: ScheduleQueryResult | null,
+  context: ConversationContext,
   board: Board
-): Extract<AssistantBlock, { type: "schedule" }> {
-  const start = board.workStart ?? "09:00";
-  const [hours, minutes] = start.split(":").map(Number);
-  let cursor = hours * 60 + minutes;
-  const slots: { time_label: string; title: string; minutes: number; task_id?: string; kind: "task" | "event" }[] = [];
-  for (const event of schedule.events) {
-    slots.push({
-      time_label: event.all_day
-        ? "All day"
-        : formatInTimeZone(new Date(event.start_at), board.timezone, "HH:mm"),
-      title: event.title,
-      minutes: 0,
-      kind: "event",
-    });
-  }
-  const ordered = [...schedule.overdue_tasks, ...schedule.tasks];
-  for (const task of ordered) {
-    const length = task.estimated_minutes ?? board.defaultDuration;
-    const label = `${String(Math.floor(cursor / 60)).padStart(2, "0")}:${String(cursor % 60).padStart(2, "0")}`;
-    slots.push({ time_label: label, title: task.title, minutes: length, task_id: task.id, kind: "task" });
-    cursor += length;
-  }
+): Promise<LocalCommandResult> {
+  storePlanInContext(context, plan);
+  const blocks: AssistantBlock[] = [planToBlock(plan)];
+  if (schedule) blocks.push(...scheduleBlocks(schedule, board.projects));
   return {
-    type: "schedule",
-    title: "Suggested day",
-    saved: false,
-    note: "This is a suggestion. It has not been saved to your calendar.",
-    slots,
+    message: describePlan(plan),
+    blocks,
+    context,
   };
 }
 
@@ -835,7 +884,7 @@ export async function runLocalCommand(
   // Recover via phrasebook intent+slots only when we still lack a canonical verb.
   const rewrittenNorm = normalizeCommand(rewritten);
   const looksCanonical =
-    /^(?:add|create|make|new|move|mark|delete|complete|finish|show|list|plan|undo|schedule|set|remove|postpone|reschedule|shift)\b/.test(
+    /^(?:add|create|make|new|move|mark|delete|complete|finish|show|list|plan|undo|schedule|set|remove|postpone|reschedule|shift|break|too much|can i finish|help me finish|what should i work|which deadlines|what(?:'s| is|s)? coming)\b/.test(
       rewrittenNorm
     ) ||
     /^(?:no|nope|wait|actually|sorry)\b.+\b(?:i meant|make it|change it)\b/.test(rewrittenNorm) ||
@@ -958,46 +1007,8 @@ export async function runLocalCommand(
     };
   }
 
-  if (/plan (?:my |the )?(?:day|today)\b|^plan my day\b/.test(norm)) {
-    const result = await act("query_schedule", { period: "today" });
-    if (!result.success) return { message: failed("plan the day", result.error), blocks: [], context };
-    const schedule = result.result as ScheduleQueryResult;
-    const block = buildPlan(schedule, board);
-    return {
-      message: block.slots.length
-        ? `Here is a suggested plan for today: ${block.slots.map((slot) => `${slot.time_label} ${slot.title}`).join("; ")}. It is not saved on the calendar.`
-        : "There are no incomplete tasks or events today to plan around. I did not save a schedule.",
-      blocks: [block, ...scheduleBlocks(schedule, board.projects)],
-      context,
-    };
-  }
-
-  if (/plan (?:my |the )?next month\b/.test(norm)) {
-    const result = await act("query_schedule", { period: "next_month" });
-    if (!result.success) return { message: failed("plan next month", result.error), blocks: [], context };
-    const schedule = result.result as ScheduleQueryResult;
-    const slots = schedule.tasks.map((task) => ({
-      time_label: task.due_date ? formatDateOnly(task.due_date) : "No deadline",
-      title: task.title,
-      minutes: task.estimated_minutes ?? board.defaultDuration,
-      task_id: task.id,
-      kind: "task" as const,
-    }));
-    return {
-      message: `Next calendar month (${schedule.period.label}) has ${schedule.tasks.length} incomplete task(s). This plan is only a suggestion and has not been saved.`,
-      blocks: [
-        {
-          type: "schedule",
-          title: `Suggested plan · ${schedule.period.label}`,
-          saved: false,
-          note: "Not saved. This is the next calendar month, not the next 30 days.",
-          slots,
-        },
-        ...scheduleBlocks(schedule, board.projects),
-      ],
-      context,
-    };
-  }
+  const planned = await handlePlanningCommands(norm, workingRaw, context, board, act);
+  if (planned) return planned;
 
   const isMutation =
     /^(?:please\s+)?(?:add|create|make|new|move|mark|delete|complete|finish|change|set|give|reschedule|shift|schedule|put|assign|remove|postpone)\b/.test(
@@ -1364,6 +1375,521 @@ export async function runLocalCommand(
   return withInterpretation(styled, interpBlock);
 }
 
+async function saveSuggestedPlan(
+  plan: SuggestedPlan,
+  context: ConversationContext,
+  board: Board,
+  act: ToolHandler
+): Promise<LocalCommandResult> {
+  const day = todayInBoard(board);
+  const taskSlots = plan.slots.filter((s) => s.kind === "task");
+  if (!taskSlots.length) {
+    return {
+      message: "There's nothing in the plan to save yet.",
+      blocks: [planToBlock(plan)],
+      context,
+    };
+  }
+  const created: string[] = [];
+  for (const slot of taskSlots) {
+    const start = fromZonedTime(`${day}T${slot.time_label.slice(0, 5) || plan.workStart}:00`, board.timezone);
+    const endMin =
+      Number(slot.time_label.slice(0, 2)) * 60 +
+      Number(slot.time_label.slice(3, 5) || 0) +
+      (slot.minutes || board.defaultDuration);
+    const endH = String(Math.floor(endMin / 60) % 24).padStart(2, "0");
+    const endM = String(endMin % 60).padStart(2, "0");
+    const end = fromZonedTime(`${day}T${endH}:${endM}:00`, board.timezone);
+    const result = await act("create_event", {
+      title: `Focus: ${slot.title}`,
+      event_type: "event",
+      start_at: start.toISOString(),
+      end_at: end.toISOString(),
+      all_day: false,
+    });
+    if (result.success) created.push(slot.title);
+  }
+  storePlanInContext(context, plan);
+  return {
+    message: created.length
+      ? `Saved ${created.length} focus block${created.length === 1 ? "" : "s"} to your calendar: ${created.join("; ")}. Task deadlines were not changed.`
+      : "I couldn't save calendar blocks for that plan.",
+    blocks: [
+      {
+        type: "schedule",
+        title: "Saved plan",
+        saved: created.length > 0,
+        note:
+          created.length > 0
+            ? "Focus blocks were added to your calendar. Task records are unchanged."
+            : "Nothing was saved.",
+        slots: plan.slots,
+      },
+    ],
+    context,
+  };
+}
+
+async function handlePlanningCommands(
+  norm: string,
+  workingRaw: string,
+  context: ConversationContext,
+  board: Board,
+  act: ToolHandler
+): Promise<LocalCommandResult | null> {
+  const style = planningStyleFromBoard(board);
+  const today = todayInBoard(board);
+
+  // Break down a goal (suggestion only — no DB writes)
+  const breakDown =
+    norm.match(/^break down\s+(.+)$/) ||
+    workingRaw.match(
+      /^(?:break|bread)(?:\s+\w+)?\s+into\s+smaller\s+steps?\s*(?:for|of|:)?\s*(.*)$/i
+    ) ||
+    norm.match(/^(?:break|bread)(?:\s+\w+)?\s+into\s+smaller\s+steps?\s*(?:for|of|:)?\s*(.*)$/i);
+  if (
+    breakDown ||
+    /^(?:break|bread) (?:this|it|that)\b/.test(norm) ||
+    /\binto smaller steps\b/.test(norm) ||
+    /\binto smaller steps\b/i.test(workingRaw)
+  ) {
+    let goal = (breakDown?.[1] || "").trim();
+    goal = goal
+      .replace(/^(?:this|it|that)\s+(?:into\s+smaller\s+steps?\s*)?(?:for|of|:)?\s*/i, "")
+      .replace(/^into\s+smaller\s+steps?\s*(?:for|of|:)?\s*/i, "")
+      .trim();
+    if (!goal || /^(?:this|it|that)$/i.test(goal)) {
+      goal =
+        context.focus?.label ||
+        context.lastProject?.name ||
+        context.lastTasks?.[0]?.title ||
+        "this goal";
+    }
+    const steps = suggestBreakdown(goal);
+    return {
+      message: [
+        `Here’s a manageable breakdown for “${goal}”. I haven’t created these as tasks — say the word if you want them saved.`,
+        ...steps.map((s, i) => `${i + 1}. ${s.title}${s.hint ? ` (${s.hint})` : ""}`),
+      ].join("\n"),
+      blocks: [
+        {
+          type: "notice",
+          tone: "info",
+          text: "Suggested steps only — nothing was written to your list.",
+        },
+        {
+          type: "followups",
+          suggestions: [
+            "Create tasks for these steps",
+            "Plan my week around this",
+            "What's coming up?",
+          ],
+        },
+      ],
+      context,
+    };
+  }
+
+  // Feasibility
+  const finishBefore = norm.match(
+    /^can i finish(?:\s+everything)?\s+before\s+(.+)$/
+  );
+  if (finishBefore) {
+    const resolved = resolveDatePhrase(
+      finishBefore[1],
+      board.timezone,
+      board.weekStartsOn,
+      board.now
+    );
+    const beforeDate =
+      resolved?.type === "day"
+        ? resolved.date
+        : resolveDatePhrase("friday", board.timezone, board.weekStartsOn, board.now)?.type ===
+            "day"
+          ? (
+              resolveDatePhrase(
+                finishBefore[1].includes("friday") ? "friday" : finishBefore[1],
+                board.timezone,
+                board.weekStartsOn,
+                board.now
+              ) as { type: "day"; date: string } | null
+            )?.date
+          : null;
+    if (!beforeDate) {
+      return {
+        message: `Which day do you mean by “${finishBefore[1]}”? For example: Friday, tomorrow, or 2026-10-31.`,
+        blocks: [],
+        context,
+      };
+    }
+    const report = feasibilityBefore(board.tasks, {
+      today,
+      beforeDate,
+      defaultDuration: board.defaultDuration,
+      workStart: board.workStart,
+      workEnd: board.workEnd,
+      projects: board.projects,
+    });
+    const top = report.ranked.slice(0, 6);
+    context.lastTasks = top.map((r) => ({ id: r.task.id, title: r.task.title }));
+    return {
+      message: [
+        report.message,
+        ...top.map(
+          (r) =>
+            `• ${r.task.title} — ${r.task.priority}${r.task.due_date ? `, due ${formatDateOnly(r.task.due_date)}` : ""}${r.estimated ? ` (~${r.minutes}m est.)` : ` (${r.minutes}m)`}`
+        ),
+        report.ok
+          ? "Want a day-by-day plan for that window?"
+          : "I can reorder, suggest what to defer, or break a large task into steps — without changing deadlines unless you ask.",
+      ].join("\n"),
+      blocks: [
+        {
+          type: "tasks",
+          title: `Open work through ${formatDateOnly(beforeDate)}`,
+          tasks: top.map((r) => toTaskCard(r.task, board.projects, board.timezone)),
+        },
+      ],
+      context,
+    };
+  }
+
+  // Defer less important work (propose, then update only with clear request)
+  if (/^move less important work to\s+(.+)$/.test(norm)) {
+    const when = norm.match(/^move less important work to\s+(.+)$/)?.[1] ?? "next week";
+    const open = board.tasks.filter((t) => t.status === "todo" || t.status === "in_progress");
+    const ranked = rankTasksForPlanning(open, {
+      today,
+      projects: board.projects,
+      defaultDuration: board.defaultDuration,
+      planningStyle: style,
+    });
+    const flexible = ranked.filter(
+      (r) =>
+        r.task.priority === "low" ||
+        r.task.priority === "medium" ||
+        (!r.task.due_date && r.task.priority !== "urgent" && r.task.priority !== "high")
+    );
+    const candidates = flexible.filter((r) => r.task.priority === "low").length
+      ? flexible.filter((r) => r.task.priority === "low")
+      : flexible.slice(-Math.max(1, Math.ceil(flexible.length / 2)));
+    if (!candidates.length) {
+      return {
+        message:
+          "I don’t see clearly flexible / low-priority work to move. Tell me which tasks are optional, or which deadlines are fixed.",
+        blocks: [],
+        context,
+      };
+    }
+    const resolved = resolveDatePhrase(when, board.timezone, board.weekStartsOn, board.now);
+    const targetDate =
+      resolved?.type === "day"
+        ? resolved.date
+        : resolved?.type === "range"
+          ? resolved.from
+          : null;
+    if (!targetDate) {
+      return {
+        message: `Move which day should “${when}” mean? I can shift low-priority work once the date is clear.`,
+        blocks: [
+          {
+            type: "tasks",
+            title: "Flexible candidates",
+            tasks: candidates
+              .slice(0, 6)
+              .map((r) => toTaskCard(r.task, board.projects, board.timezone)),
+          },
+        ],
+        context,
+      };
+    }
+    const updated: Task[] = [];
+    for (const item of candidates.slice(0, 8)) {
+      // Never silently change urgent/high with a near deadline
+      if (
+        (item.task.priority === "urgent" || item.task.priority === "high") &&
+        item.task.due_date &&
+        item.task.due_date <= addCalendarDays(today, 2)
+      ) {
+        continue;
+      }
+      const result = await act("update_task", {
+        id: item.task.id,
+        due_date: targetDate,
+      });
+      const task = taskFrom(result.result);
+      if (result.success && task) updated.push(task);
+    }
+    context.lastTasks = updated.map((t) => ({ id: t.id, title: t.title }));
+    return {
+      message: updated.length
+        ? `Moved ${updated.length} lower-priority / flexible task${updated.length === 1 ? "" : "s"} to ${formatDateOnly(targetDate)}. Urgent near-term work was left alone.`
+        : "I didn’t move anything — the remaining open work looks high-priority or near-term. Tell me which items are flexible.",
+      blocks: updated.length
+        ? [
+            {
+              type: "tasks",
+              title: "Rescheduled",
+              tasks: updated.map((t) => toTaskCard(t, board.projects, board.timezone)),
+            },
+          ]
+        : [],
+      context,
+    };
+  }
+
+  // Priority-first recommendation
+  if (/^what should i work on first\b/.test(norm)) {
+    const open = board.tasks.filter((t) => t.status === "todo" || t.status === "in_progress");
+    const ranked = rankTasksForPlanning(open, {
+      today,
+      projects: board.projects,
+      defaultDuration: board.defaultDuration,
+      planningStyle: style,
+    });
+    if (!ranked.length) {
+      return { message: "You have no incomplete tasks to prioritize.", blocks: [], context };
+    }
+    const top = ranked.slice(0, 5);
+    rememberTask(context, top[0].task);
+    context.lastTasks = top.map((r) => ({ id: r.task.id, title: r.task.title }));
+    const lines = [
+      `I’d start with “${top[0].task.title}” — ${top[0].reasons.join("; ")}.`,
+      "Not only by earliest deadline — importance, project pressure, and progress count too.",
+      ...top.slice(1).map((r, i) => `${i + 2}. ${r.task.title} — ${r.reasons[0]}`),
+    ];
+    return {
+      message: lines.join("\n"),
+      blocks: [
+        {
+          type: "tasks",
+          title: "Suggested order",
+          tasks: top.map((r) => toTaskCard(r.task, board.projects, board.timezone)),
+        },
+      ],
+      context,
+    };
+  }
+
+  // Deadlines to worry about
+  if (/^which deadlines should i worry about\b/.test(norm)) {
+    const open = board.tasks.filter(
+      (t) => (t.status === "todo" || t.status === "in_progress") && t.due_date
+    );
+    const ranked = rankTasksForPlanning(open, {
+      today,
+      projects: board.projects,
+      defaultDuration: board.defaultDuration,
+      planningStyle: style,
+    }).filter((r) => {
+      const due = r.task.due_date!.slice(0, 10);
+      return due <= addCalendarDays(today, 14);
+    });
+    const projects = board.projects.filter(
+      (p) =>
+        p.status !== "completed" &&
+        p.status !== "archived" &&
+        p.deadline &&
+        p.deadline.slice(0, 10) <= addCalendarDays(today, 14)
+    );
+    if (!ranked.length && !projects.length) {
+      return {
+        message: "Nothing with a deadline in the next two weeks looks pressing.",
+        blocks: [],
+        context,
+      };
+    }
+    context.lastTasks = ranked.slice(0, 10).map((r) => ({ id: r.task.id, title: r.task.title }));
+    const lines = ["Deadlines worth watching (importance + proximity, not date alone):"];
+    for (const r of ranked.slice(0, 8)) {
+      lines.push(
+        `• ${r.task.title} — due ${formatDateOnly(r.task.due_date)}, ${r.task.priority}${r.reasons[0] ? ` (${r.reasons[0]})` : ""}`
+      );
+    }
+    for (const p of projects.slice(0, 4)) {
+      lines.push(`• Project “${p.name}” — deadline ${formatDateOnly(p.deadline)}, ${p.priority}`);
+    }
+    return {
+      message: lines.join("\n"),
+      blocks: [
+        {
+          type: "tasks",
+          title: "Upcoming deadlines",
+          tasks: ranked.slice(0, 8).map((r) => toTaskCard(r.task, board.projects, board.timezone)),
+        },
+      ],
+      context,
+    };
+  }
+
+  // What's coming up
+  if (/^what(?:'s| is|s)? coming up\b/.test(norm)) {
+    const result = await act("query_schedule", { period: "next_7_days" });
+    if (!result.success || !result.result) {
+      return { message: failed("check what's coming up", result.error), blocks: [], context };
+    }
+    const schedule = result.result as ScheduleQueryResult;
+    const plan = periodPlanFromSchedule(schedule, board, "week");
+    return respondWithPlan(plan, schedule, context, board);
+  }
+
+  // Help finish project on time
+  if (
+    /^help me finish\b/.test(norm) &&
+    /\bon time\b/.test(norm)
+  ) {
+    const hint = norm.replace(/^help me finish\s+/i, "").replace(/\s+on time$/i, "").trim();
+    const project =
+      board.projects.find((p) => scoreName(hint, p.name) >= 40) ||
+      (context.lastProject
+        ? board.projects.find((p) => p.id === context.lastProject?.id)
+        : null) ||
+      board.projects.find((p) => p.status === "active") ||
+      null;
+    if (!project) {
+      return {
+        message:
+          "Which project should we plan around? Name it, or create one first.",
+        blocks: [],
+        context,
+      };
+    }
+    context.lastProject = { id: project.id, name: project.name };
+    const related = board.tasks.filter(
+      (t) => t.project_id === project.id && (t.status === "todo" || t.status === "in_progress")
+    );
+    const plan = buildPeriodPlan({
+      tasks: related.length ? related : board.tasks.filter((t) => t.status === "todo" || t.status === "in_progress"),
+      projects: board.projects,
+      today,
+      periodLabel: project.deadline
+        ? `${project.name} through ${formatDateOnly(project.deadline)}`
+        : project.name,
+      periodKind: "range",
+      horizon: "project",
+      defaultDuration: board.defaultDuration,
+      planningStyle: style,
+      preferProjectId: project.id,
+    });
+    const steps =
+      related.length === 0
+        ? suggestBreakdown(project.name)
+        : null;
+    storePlanInContext(context, plan);
+    const lines = [
+      `Focus on “${project.name}”${project.deadline ? ` (deadline ${formatDateOnly(project.deadline)})` : ""}.`,
+      describePlan(plan),
+    ];
+    if (steps) {
+      lines.push("No open tasks are linked yet — suggested steps (not saved):");
+      steps.forEach((s, i) => lines.push(`${i + 1}. ${s.title}`));
+    }
+    return {
+      message: lines.join("\n"),
+      blocks: [
+        planToBlock(plan, `Project plan · ${project.name}`),
+        {
+          type: "projects",
+          title: "Project",
+          projects: [toProjectCard(project, related, [])],
+        },
+      ],
+      context,
+    };
+  }
+
+  // Overload / too much to do
+  if (/^too much to do\b/.test(norm)) {
+    const period = /\btomorrow\b/.test(norm)
+      ? "tomorrow"
+      : /\bthis month\b|\bmonth\b/.test(norm)
+        ? "this_month"
+        : "this_week";
+    const result = await act("query_schedule", { period });
+    if (!result.success || !result.result) {
+      return { message: failed("review that workload", result.error), blocks: [], context };
+    }
+    const schedule = result.result as ScheduleQueryResult;
+    const plan =
+      period === "tomorrow"
+        ? dayPlanFromSchedule(schedule, board)
+        : periodPlanFromSchedule(
+            schedule,
+            board,
+            period === "this_month" ? "month" : "week"
+          );
+    plan.overloaded = true;
+    plan.overloadNote =
+      plan.overloadNote ??
+      "This week looks heavy. I can reorder by importance, suggest what to defer, split a large task, or ask which deadlines are fixed — I won’t change or delete anything unless you ask.";
+    storePlanInContext(context, plan);
+    return {
+      message: [
+        describePlan(plan),
+        "Alternatives: reorder, split a large task, move flexible work, or tell me which deadlines are fixed.",
+      ].join("\n"),
+      blocks: [
+        planToBlock(plan, `Workload · ${schedule.period.label}`),
+        ...scheduleBlocks(schedule, board.projects),
+        {
+          type: "followups",
+          suggestions: [
+            "What should I work on first?",
+            "Move less important work to next week",
+            "Break this into smaller steps",
+          ],
+        },
+      ],
+      context,
+    };
+  }
+
+  // Explicit plan my day / tomorrow / week / month
+  const planDay = /^(?:plan (?:my |the )?(?:day|today)|plan my day)\b/.test(norm);
+  const planTomorrow = /^(?:plan (?:my |the |for )?tomorrow)\b/.test(norm);
+  const planWeek = /^(?:plan (?:my |the )?week|plan my this week)\b/.test(norm);
+  const planNextWeek = /^plan (?:my |the )?next week\b/.test(norm);
+  const planMonth = /^plan (?:my |the )?month\b/.test(norm);
+  const planNextMonth = /^plan (?:my |the )?next month\b/.test(norm);
+
+  if (planDay || planTomorrow || planWeek || planNextWeek || planMonth || planNextMonth) {
+    const period = planTomorrow
+      ? "tomorrow"
+      : planNextWeek
+        ? "next_week"
+        : planWeek
+          ? "this_week"
+          : planNextMonth
+            ? "next_month"
+            : planMonth
+              ? "this_month"
+              : "today";
+    const result = await act("query_schedule", { period });
+    if (!result.success || !result.result) {
+      return { message: failed("build that plan", result.error), blocks: [], context };
+    }
+    const schedule = result.result as ScheduleQueryResult;
+    const plan =
+      period === "today" || period === "tomorrow"
+        ? dayPlanFromSchedule(schedule, board)
+        : periodPlanFromSchedule(
+            schedule,
+            board,
+            period === "this_month" || period === "next_month" ? "month" : "week"
+          );
+    if (!plan.slots.length) {
+      return {
+        message: `There are no incomplete tasks or events for ${schedule.period.label} to plan around. I did not save a schedule.`,
+        blocks: scheduleBlocks(schedule, board.projects),
+        context,
+      };
+    }
+    return respondWithPlan(plan, schedule, context, board);
+  }
+
+  return null;
+}
+
 /**
  * Multi-turn follow-ups that must run on the raw utterance before schedule/create
  * rewrites steal phrases like "what about the other…" or "make it shorter".
@@ -1376,7 +1902,30 @@ async function handleContextFollowUps(
 ): Promise<LocalCommandResult | null> {
   const norm = normalizeCommand(raw.replace(/[.!?…]+$/g, ""));
 
-  if (/^make it shorter\b/.test(norm) || /^shorten (?:it|that|the title|the task)\b/.test(norm)) {
+  // Plan follow-ups when a suggested plan is in context.
+  // Prefer compressing the plan over renaming a task title when lastPlan exists,
+  // unless the user explicitly asks to shorten the title.
+  if (context.lastPlan?.slots?.length) {
+    const planFollow = applyPlanFollowUp(raw, context, board);
+    if (planFollow?.saveRequested) {
+      return saveSuggestedPlan(planFollow.plan, context, board, act);
+    }
+    if (planFollow) {
+      return {
+        message: planFollow.message,
+        blocks: [planToBlock(planFollow.plan)],
+        context,
+      };
+    }
+  }
+
+  if (
+    (/^make it shorter\b/.test(norm) || /^shorten (?:it|that|the title|the task)\b/.test(norm)) &&
+    !context.lastPlan?.slots?.length
+  ) {
+    return shortenFocusedTask(context, board, act);
+  }
+  if (/^shorten (?:the )?title\b/.test(norm) || /^make (?:the )?title shorter\b/.test(norm)) {
     return shortenFocusedTask(context, board, act);
   }
 

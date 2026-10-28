@@ -166,30 +166,99 @@ function harness(initial = board()) {
           ? current.tasks.filter((item) => item.due_date === "2026-10-22" && item.status !== "done")
           : period === "tomorrow"
             ? current.tasks.filter((item) => item.due_date === "2026-10-23" && item.status !== "done")
-            : period === "next_month"
-              ? current.tasks.filter((item) => item.due_date?.startsWith("2026-11") && item.status !== "done")
-              : period === "overdue"
-                ? current.tasks.filter((item) => item.due_date === "2026-10-21" && item.status !== "done")
-                : [];
+            : period === "this_week" || period === "next_7_days"
+              ? current.tasks.filter(
+                  (item) =>
+                    item.status !== "done" &&
+                    item.due_date &&
+                    item.due_date >= "2026-10-20" &&
+                    item.due_date <= "2026-10-26"
+                )
+              : period === "next_week"
+                ? current.tasks.filter(
+                    (item) =>
+                      item.status !== "done" &&
+                      item.due_date &&
+                      item.due_date >= "2026-10-27" &&
+                      item.due_date <= "2026-11-02"
+                  )
+                : period === "this_month" || period === "next_month"
+                  ? current.tasks.filter((item) =>
+                      period === "next_month"
+                        ? item.due_date?.startsWith("2026-11") && item.status !== "done"
+                        : item.due_date?.startsWith("2026-10") && item.status !== "done"
+                    )
+                  : period === "overdue"
+                    ? current.tasks.filter(
+                        (item) => item.due_date === "2026-10-21" && item.status !== "done"
+                      )
+                    : [];
       return {
         success: true,
         result: {
           period: {
             kind: period,
-            label: period === "next_month" ? "November 2026" : period,
-            from: period === "next_month" ? "2026-11-01" : null,
-            to: period === "next_month" ? "2026-11-30" : null,
+            label:
+              period === "next_month"
+                ? "November 2026"
+                : period === "this_week"
+                  ? "This week"
+                  : period === "next_7_days"
+                    ? "The next 7 days"
+                    : period,
+            from:
+              period === "next_month"
+                ? "2026-11-01"
+                : period === "today"
+                  ? "2026-10-22"
+                  : period === "tomorrow"
+                    ? "2026-10-23"
+                    : period === "this_week" || period === "next_7_days"
+                      ? "2026-10-20"
+                      : null,
+            to:
+              period === "next_month"
+                ? "2026-11-30"
+                : period === "today"
+                  ? "2026-10-22"
+                  : period === "tomorrow"
+                    ? "2026-10-23"
+                    : period === "this_week" || period === "next_7_days"
+                      ? "2026-10-26"
+                      : null,
           },
           timezone: "Asia/Karachi",
           tasks,
           overdue_tasks:
-            period === "today"
-              ? current.tasks.filter((item) => item.due_date === "2026-10-21")
+            period === "today" || period === "this_week"
+              ? current.tasks.filter((item) => item.due_date === "2026-10-21" && item.status !== "done")
               : [],
-          events: period === "tomorrow" ? current.events : [],
-          projects: period === "next_month" ? current.projects : [],
+          events:
+            period === "tomorrow" || period === "today" || period === "this_week"
+              ? current.events.filter((event) =>
+                  period === "tomorrow"
+                    ? event.start_at.startsWith("2026-10-23")
+                    : period === "today"
+                      ? event.start_at.startsWith("2026-10-22")
+                      : true
+                )
+              : [],
+          projects: period === "next_month" || period === "this_week" ? current.projects : [],
           completed_omitted: period === "today" ? 1 : 0,
           estimated_minutes: tasks.length * 30,
+        },
+      };
+    }
+    if (name === "create_event") {
+      return {
+        success: true,
+        result: {
+          id: "66666666-6666-4666-8666-666666666699",
+          title: String(args.title),
+          start_at: args.start_at,
+          end_at: args.end_at,
+          all_day: false,
+          event_type: "event",
         },
       };
     }
@@ -797,5 +866,85 @@ describe("local assistant commands", () => {
     );
     expect(result.blocks.some((block) => block.type === "interpretation")).toBe(false);
     expect(env.calls.some((call) => call.name === "create_task")).toBe(true);
+  });
+
+  it("plans today from real schedule data without saving", async () => {
+    const env = harness();
+    const result = await runLocalCommand("Help me plan tomorrow.", emptyContext(), env.board, env.act);
+    expect(env.calls.some((c) => c.name === "query_schedule" && c.args.period === "tomorrow")).toBe(
+      true
+    );
+    expect(result.blocks.some((b) => b.type === "schedule" && b.saved === false)).toBe(true);
+    expect(result.context.lastPlan?.slots.length).toBeGreaterThan(0);
+    expect(result.message).toMatch(/not been saved|nothing was saved|suggestion/i);
+  });
+
+  it("recommends what to work on first using priority not only due date", async () => {
+    const env = harness(
+      board({
+        tasks: [
+          task({
+            id: "44444444-4444-4444-8444-444444444401",
+            title: "Low chore",
+            due_date: "2026-10-22",
+            priority: "low",
+          }),
+          task({
+            id: "44444444-4444-4444-8444-444444444402",
+            title: "Urgent deliverable",
+            due_date: "2026-10-28",
+            priority: "urgent",
+          }),
+        ],
+      })
+    );
+    const result = await runLocalCommand(
+      "What should I work on first?",
+      emptyContext(),
+      env.board,
+      env.act
+    );
+    expect(result.message).toMatch(/Urgent deliverable/i);
+    expect(result.message.toLowerCase()).toMatch(/not only|importance|priority/);
+  });
+
+  it("handles overload and breakdown without creating tasks", async () => {
+    const env = harness();
+    const overload = await runLocalCommand(
+      "I've got too much to do this week.",
+      emptyContext(),
+      env.board,
+      env.act
+    );
+    expect(env.calls.some((c) => c.name === "query_schedule" && c.args.period === "this_week")).toBe(
+      true
+    );
+    expect(overload.message.toLowerCase()).toMatch(/reorder|defer|split|alternatives|heavy|tight|workload/);
+
+    const breakdown = await runLocalCommand(
+      "Break this into smaller steps for a science exhibition",
+      emptyContext(),
+      env.board,
+      env.act
+    );
+    expect(env.calls.filter((c) => c.name === "create_task")).toHaveLength(0);
+    expect(breakdown.message.toLowerCase()).toMatch(/research|haven't created|not saved|suggested/);
+  });
+
+  it("applies plan follow-ups from conversation context", async () => {
+    const env = harness();
+    let context = emptyContext();
+    const planned = await runLocalCommand("plan my day", context, env.board, env.act);
+    context = planned.context;
+    expect(context.lastPlan?.slots.length).toBeGreaterThan(0);
+
+    const shorter = await runLocalCommand("Make it shorter.", context, env.board, env.act);
+    context = shorter.context;
+    expect(shorter.context.lastPlan!.slots.filter((s) => s.kind === "task").length).toBeLessThanOrEqual(
+      planned.context.lastPlan!.slots.filter((s) => s.kind === "task").length
+    );
+
+    const start = await runLocalCommand("What if I start at 4 PM?", context, env.board, env.act);
+    expect(start.context.lastPlan?.workStart).toBe("16:00");
   });
 });

@@ -33,7 +33,6 @@ import {
 import { resolveDatePhrase, resolveRelativeDate } from "@/lib/utils/dates";
 import { runExtendedTool, verifyTaskWrite } from "./extra-tools";
 import { matchMemoriesForForget, retrieveRelevantMemories } from "./memory";
-import { sortTasksByPriorityThenDue as sortTasks } from "@/lib/utils/progress";
 import {
   createChecklistSchema,
   createEventSchema,
@@ -855,13 +854,43 @@ export async function executeTool(
           .parse(rawArgs);
         const prefs = await getPreferences(auth);
         const defaultDuration = prefs.default_task_duration_minutes ?? 45;
-        const open = await listTasks(
-          { status: undefined, overdue_only: false, limit: 50 },
-          auth
+        const timezone = prefs.timezone || auth.profile.timezone || "UTC";
+        const [open, events, projects] = await Promise.all([
+          listTasks({ status: undefined, overdue_only: false, limit: 50 }, auth),
+          listEvents({ limit: 100 }, auth),
+          listProjects(auth),
+        ]);
+        const { buildDayPlan, rankTasksForPlanning } = await import("./planning");
+        const { calendarToday } = await import("@/lib/utils/dates");
+        const today = calendarToday(timezone);
+        const incomplete = open.filter(
+          (t) => t.status === "todo" || t.status === "in_progress"
         );
-        const candidates = sortTasks(
-          open.filter((t) => t.status === "todo" || t.status === "in_progress")
-        );
+        const dayPlan = buildDayPlan({
+          tasks: incomplete.filter(
+            (t) => !t.due_date || t.due_date.slice(0, 10) <= today
+          ),
+          overdueTasks: incomplete.filter(
+            (t) => t.due_date && t.due_date.slice(0, 10) < today
+          ),
+          events,
+          projects,
+          day: today,
+          periodLabel: "Today",
+          timezone,
+          workStart: prefs.preferred_working_hours_start,
+          workEnd: prefs.preferred_working_hours_end,
+          defaultDuration,
+          planningStyle: prefs.planning_style,
+          maxSlots: 20,
+        });
+        // Honor available_minutes budget using ranked order (not earliest-due alone).
+        const ranked = rankTasksForPlanning(incomplete, {
+          today,
+          projects,
+          defaultDuration,
+          planningStyle: prefs.planning_style,
+        });
         const plan: {
           task_id: string;
           title: string;
@@ -869,19 +898,15 @@ export async function executeTool(
           reason: string;
         }[] = [];
         let remaining = available_minutes;
-        for (const task of candidates) {
-          const est = task.estimated_minutes ?? defaultDuration;
-          if (est > remaining) continue;
+        for (const item of ranked) {
+          if (item.minutes > remaining) continue;
           plan.push({
-            task_id: task.id,
-            title: task.title,
-            estimated_minutes: est,
-            reason:
-              task.priority === "urgent" || task.priority === "high"
-                ? "High priority"
-                : "Fits remaining time",
+            task_id: item.task.id,
+            title: item.task.title,
+            estimated_minutes: item.minutes,
+            reason: item.reasons.slice(0, 2).join("; ") || "Fits remaining time",
           });
-          remaining -= est;
+          remaining -= item.minutes;
           if (remaining < 10) break;
         }
         return {
@@ -891,6 +916,11 @@ export async function executeTool(
             allocated_minutes: available_minutes - remaining,
             remaining_minutes: remaining,
             plan,
+            overloaded: dayPlan.overloaded,
+            overload_note: dayPlan.overloadNote,
+            schedule_slots: dayPlan.slots,
+            used_default_estimates: dayPlan.defaultDurationUsed,
+            note: "Suggestion only — not saved unless the user asks to save the plan.",
           },
         };
       }

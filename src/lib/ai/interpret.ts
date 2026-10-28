@@ -233,8 +233,15 @@ function cueBoosts(norm: string): Partial<Record<IntentKind, number>> {
   if (/\b(?:list:|checklist|groceries|shopping list|packing)\b/.test(norm)) {
     boosts.create_checklist = (boosts.create_checklist ?? 0) + 0.3;
   }
-  if (/\b(?:plan my|focus on|organize my)\b/.test(norm)) {
+  if (/\b(?:plan my|focus on|organize my|plan tomorrow|plan (?:my )?week|too much to do)\b/.test(norm)) {
     boosts.plan_day = (boosts.plan_day ?? 0) + 0.3;
+    boosts.plan_week = (boosts.plan_week ?? 0) + 0.2;
+  }
+  if (/\b(?:work on first|deadlines? should i|prioriti[sz]e|coming up)\b/.test(norm)) {
+    boosts.plan_priority = (boosts.plan_priority ?? 0) + 0.35;
+  }
+  if (/\b(?:break .+ into|smaller steps|break this down)\b/.test(norm)) {
+    boosts.breakdown = (boosts.breakdown ?? 0) + 0.4;
   }
   if (/\b(?:i meant|make it|actually|change it to|instead)\b/.test(norm)) {
     boosts.correction = (boosts.correction ?? 0) + 0.35;
@@ -313,8 +320,48 @@ function buildCanonical(
       if (/\bno deadline\b|\bundated\b/.test(n)) return "show my tasks with no deadline";
       return "show my tasks for today";
     }
-    case "plan_day":
+    case "plan_day": {
+      const n = normalizeForMatch(clause);
+      if (/\btomorrow\b/.test(n)) return "plan my tomorrow";
+      if (/\bnext week\b/.test(n)) return "plan my next week";
+      if (/\bweek\b/.test(n)) return "plan my week";
+      if (/\bnext month\b/.test(n)) return "plan my next month";
+      if (/\bmonth\b/.test(n)) return "plan my month";
       return "plan my day";
+    }
+    case "plan_week": {
+      const n = normalizeForMatch(clause);
+      if (/\btoo much\b|\boverwhelmed\b|\bswamped\b/.test(n)) {
+        return /\btomorrow\b/.test(n)
+          ? "too much to do tomorrow"
+          : "too much to do this week";
+      }
+      if (/\bproject\b/.test(n)) return "help me finish my project on time";
+      if (/\bnext week\b/.test(n)) return "plan my next week";
+      return "plan my week";
+    }
+    case "plan_priority": {
+      const n = normalizeForMatch(clause);
+      if (/\bdeadline/.test(n)) return "which deadlines should I worry about";
+      if (/\bbefore\b|\bby friday\b|\bfinish everything\b/.test(n)) {
+        const m = clause.match(/\b(?:before|by)\s+(.+)$/i);
+        return m
+          ? `can I finish everything before ${m[1].trim()}`
+          : "can I finish everything before Friday";
+      }
+      if (/\bcoming up\b/.test(n)) return "what's coming up";
+      return "what should I work on first";
+    }
+    case "breakdown": {
+      const goal =
+        title ||
+        clause
+          .replace(/^.*?\b(?:break(?:\s+\w+)?\s+(?:down|into)|split)\s+/i, "")
+          .replace(/\binto\s+smaller\s+steps?\b/i, "")
+          .trim() ||
+        "this goal";
+      return `break down ${goal}`;
+    }
     case "undo":
       return "undo";
     case "create_checklist":

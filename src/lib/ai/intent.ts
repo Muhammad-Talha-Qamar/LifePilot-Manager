@@ -6,6 +6,10 @@
 import { primaryClause } from "./interpret";
 import { normalizeInput } from "./normalize-input";
 import {
+  detectPlanningCommand,
+  planningCommandToText,
+} from "./planning";
+import {
   blocksCreateRewrite,
   detectStance,
   extractFinishSubject,
@@ -392,12 +396,13 @@ function rewriteMoves(text: string): string {
  */
 function rewriteBareTask(text: string): string {
   if (
-    /^(?:add|create|make|new|move|mark|delete|complete|finish|change|set|give|reschedule|shift|schedule|show|list|what|which|how|plan|undo|yes|no|nope|nah|cancel|wait|actually|sorry|i meant|who|why|when|where)\b/i.test(
+    /^(?:add|create|make|new|move|mark|delete|complete|finish|change|set|give|reschedule|shift|schedule|show|list|what|which|how|plan|undo|yes|no|nope|nah|cancel|wait|actually|sorry|i meant|who|why|when|where|too much|break down|can i finish|move less important|help me finish)\b/i.test(
       text
     )
   ) {
     return text;
   }
+  if (detectPlanningCommand(text)) return text;
   if (/\b(?:i meant|make it|change it to|it should be)\b/i.test(text)) {
     return text;
   }
@@ -429,6 +434,10 @@ function rewriteBareTask(text: string): string {
 
 function rewritePriority(text: string): string {
   if (/most urgent|highest priority|make .+ urgent|priorit(?:y|ise|ize)|more urgent/i.test(text)) {
+    // "what should I prioritize first" is planning, not a priority mutation.
+    if (/what should i (?:work on|do|focus on|prioriti[sz]e)\s+first/i.test(text)) {
+      return text;
+    }
     if (/^(?:what(?:'s| is)?|find|get)\s+(?:my\s+)?most urgent/i.test(text)) {
       return "most urgent task priority";
     }
@@ -440,6 +449,12 @@ function rewritePriority(text: string): string {
   // "ASAP: X" / "urgent: X"
   const asap = text.match(/^(?:asap|urgent|important)\s*[:\-]\s*(.+)$/i);
   if (asap) return `add ${asap[1]} urgent`;
+  return text;
+}
+
+function rewritePlanning(text: string): string {
+  const cmd = detectPlanningCommand(text);
+  if (cmd) return planningCommandToText(cmd);
   return text;
 }
 
@@ -504,6 +519,13 @@ export function rewriteIntent(input: string): string {
   }
 
   text = rewriteUndo(text);
+  const beforePlan = text;
+  text = rewritePlanning(text);
+  // Canonical planning commands must not be re-interpreted as creates
+  // (e.g. "too much to do this week" must not become "add … for this week").
+  if (text !== beforePlan || detectPlanningCommand(text)) {
+    return stripTrailingPunct(text.replace(/\s+/g, " ").trim());
+  }
   text = rewriteQueries(text);
   text = rewriteDeletes(text);
   text = rewriteCompletes(text);

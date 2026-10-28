@@ -93,6 +93,15 @@ export interface ConversationContext {
   pendingRequest?: PendingRequest | null;
   /** Last successful turn — used for elliptical follow-ups and corrections. */
   lastTurn?: LastTurn | null;
+  /** Last suggested workload plan (not saved unless the user asks). */
+  lastPlan?: {
+    horizon: string;
+    periodLabel: string;
+    workStart: string;
+    workEnd: string;
+    overloaded?: boolean;
+    slots: ScheduleSlot[];
+  } | null;
   undo?: UndoEntry[];
 }
 
@@ -211,5 +220,6 @@ export function emptyContext(): ConversationContext {
     undo: [],
     pendingRequest: null,
     lastTurn: null,
+    lastPlan: null,
   };
 }

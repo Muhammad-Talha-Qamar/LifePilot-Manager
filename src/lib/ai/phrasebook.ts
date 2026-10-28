@@ -22,6 +22,9 @@ export type IntentKind =
   | "create_checklist"
   | "add_checklist_items"
   | "plan_day"
+  | "plan_week"
+  | "plan_priority"
+  | "breakdown"
   | "reschedule"
   | "priority"
   | "undo"
@@ -245,6 +248,61 @@ export const FEW_SHOT_EXAMPLES: Array<{
     action: "plan around today's open work",
   },
   {
+    user: "Help me plan tomorrow.",
+    intent: "plan_day",
+    action: "query_schedule tomorrow → day plan respecting calendar + priorities",
+  },
+  {
+    user: "What should I work on first?",
+    intent: "plan_priority",
+    action: "rank open tasks by priority+deadline+project — explain top pick",
+  },
+  {
+    user: "I've got too much to do this week.",
+    intent: "plan_week",
+    action: "query_schedule this_week → overload advice + prioritized order",
+  },
+  {
+    user: "What's coming up?",
+    intent: "query_schedule",
+    action: "query_schedule next_7_days → prioritized upcoming plan",
+  },
+  {
+    user: "Which deadlines should I worry about?",
+    intent: "plan_priority",
+    action: "surface near-term deadlines weighted by importance",
+  },
+  {
+    user: "Help me finish my project on time.",
+    intent: "plan_week",
+    action: "prefer project tasks → period plan + optional breakdown",
+  },
+  {
+    user: "Break this into smaller steps.",
+    intent: "breakdown",
+    action: "suggest steps only — do not create tasks until asked",
+  },
+  {
+    user: "Can I finish everything before Friday?",
+    intent: "plan_priority",
+    action: "feasibility vs working hours; distinguish estimates",
+  },
+  {
+    user: "Move the less important work to next week.",
+    intent: "reschedule",
+    action: "reschedule low-priority/flexible tasks only — leave urgent near-term alone",
+  },
+  {
+    user: "Make it shorter.",
+    intent: "plan_day",
+    action: "if lastPlan: compress plan; else shorten focused title",
+  },
+  {
+    user: "Save this plan.",
+    intent: "plan_day",
+    action: "create calendar focus blocks from lastPlan slots (tasks unchanged)",
+  },
+  {
     user: "make the essay urgent",
     intent: "priority",
     action: "search essay → update_task priority=urgent",
@@ -410,7 +468,14 @@ CHECKLIST — multi-item lists:
   add X to my … checklist / add eggs to groceries
 
 PLAN — suggested order (not saved unless asked):
-  plan my day / what should I focus on / help me organize my morning
+  plan my day/tomorrow/week/month / what should I work on first /
+  too much to do / what's coming up / which deadlines matter /
+  finish project on time / break into smaller steps /
+  can I finish before Friday / move less important work /
+  follow-ups: make it shorter, move 2nd task to afternoon, start at 4pm,
+  remove finished, project first, save this plan
+  Always query_schedule / list real tasks first. Never invent durations or hours.
+  Do not create breakdown tasks until the user confirms.
 
 RESCHEDULE — change a due date:
   move X to … / postpone X until … / change deadline of X to … / push back …

@@ -11,6 +11,10 @@ import { interpretUtterance } from "./interpret";
 import { rewriteIntent } from "./intent";
 import { normalizeInput } from "./normalize-input";
 import {
+  detectPlanningCommand,
+  planningCommandToText,
+} from "./planning";
+import {
   blocksCreateRewrite,
   detectStance,
   extractFinishSubject,
@@ -231,18 +235,8 @@ function softChecklist(text: string): string | null {
 }
 
 function softPlan(text: string): string | null {
-  if (
-    /^(?:help me )?(?:plan|organize|structure|schedule|map out)\s+(?:my\s+)?(?:day|today|morning|afternoon|evening)/i.test(
-      text
-    ) ||
-    /what should i (?:do|focus on|work on|prioriti[sz]e)(?:\s+today)?/i.test(text) ||
-    /what(?:'s| is) the best (?:use of|way to spend) (?:my )?time/i.test(text) ||
-    /help me (?:get|stay) organized/i.test(text) ||
-    /build me a (?:day|daily) plan/i.test(text)
-  ) {
-    return "plan my day";
-  }
-  if (/plan\s+(?:out\s+)?(?:my\s+)?next month/i.test(text)) return "plan my next month";
+  const cmd = detectPlanningCommand(text);
+  if (cmd) return planningCommandToText(cmd);
   return null;
 }
 
