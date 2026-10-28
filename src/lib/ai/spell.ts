@@ -30,6 +30,12 @@ const PROTECTED_WORDS = new Set([
   "piece",
   "principal",
   "principle",
+  "book", // ≠ took — "book the dentist" is a create cue
+  "onto", // ≠ into — "slap X onto my backlog"
+  "dump", // slang create ("dump laundry on my plate"), ≠ bump
+  "chuck", // slang create, ≠ check
+  "slap", // slang create
+  "live", // ≠ give — content word in titles ("QA live verification")
 ]);
 
 export function isProtectedWord(word: string): boolean {
@@ -100,6 +106,7 @@ const DOMAIN_VOCAB = [
   "postpone",
   "delay",
   "bump",
+  "push",
   "plan",
   "organize",
   "schedule",
@@ -128,6 +135,20 @@ const DOMAIN_VOCAB = [
   "parking",
   "passport",
   "charger",
+  "book",
+  "onto",
+  "dump",
+  "chuck",
+  "slap",
+  "pencil",
+  "backlog",
+  "standup",
+  "laundry",
+  "dentist",
+  "vaccine",
+  "passport",
+  "taxes",
+  "plants",
   "hey",
   "hi",
   "hello",
@@ -454,6 +475,7 @@ const NEVER_CORRECT = new Set([
   "hi",
   "yo",
   "sup",
+  "live",
   // Conversational follow-up words — must not fuzzy into nearby vocab (same→save).
   "same",
   "other",
@@ -475,6 +497,8 @@ const EXPLICIT: Record<string, string> = {
   tommorw: "tomorrow",
   tmorrow: "tomorrow",
   tmrw: "tomorrow",
+  tmrrw: "tomorrow",
+  tmrrow: "tomorrow",
   tmr: "tomorrow",
   tomrw: "tomorrow",
   tomoroww: "tomorrow",
@@ -567,6 +591,16 @@ const EXPLICIT: Record<string, string> = {
   urgnt: "urgent",
   urget: "urgent",
   emrgency: "emergency",
+  mrk: "mark",
+  makr: "mark",
+  dun: "done",
+  dnoe: "done",
+  pussh: "push",
+  psh: "push",
+  standupp: "standup",
+  standuup: "standup",
+  standap: "standup",
+  adde: "add",
   calender: "calendar",
   calandar: "calendar",
   deadlne: "deadline",
@@ -866,7 +900,10 @@ function applyPhraseRepairs(text: string): string {
     .replace(/\bto\s+by\b/gi, "to buy")
     .replace(/\b(add|create)\s+by\s+/gi, "$1 buy ")
     .replace(/\bupcomming\b/gi, "upcoming")
-    .replace(/\bhomwork\b/gi, "homework");
+    .replace(/\bhomwork\b/gi, "homework")
+    // Leading "ad tesk/task" typo for "add task"
+    .replace(/\bad\s+(tesk|task|todo)\b/gi, "add $1")
+    .replace(/\bad\s+(['"]).+?\1/gi, (m) => m.replace(/^ad\b/i, "add"));
 }
 
 /** Light grammar cleanup that helps intent regexes. */

@@ -36,11 +36,26 @@ function softCreate(text: string): string | null {
   const gotta = text.match(/^(?:gotta|lemme|let me|let us)\s+(.+)$/i);
   if (gotta) return `add ${gotta[1]}`;
 
-  // "can you remind me …" / "could you jot down …"
+  // "can you remind me …" / "could you jot down …" / "pencil in …"
   const jot = text.match(
-    /^(?:can you|could you|would you|will you)?\s*(?:please\s+)?(?:jot(?:\s+down)?|note(?:\s+down)?|write(?:\s+down)?|save|log|capture|park)\s+(.+)$/i
+    /^(?:can you|could you|would you|will you|i(?:'d| would) appreciate(?: it)? if you could)?\s*(?:please\s+)?(?:jot(?:\s+down)?|pencil(?:\s+in)?|note(?:\s+down)?|write(?:\s+down)?|save|log|capture|park)\s+(.+)$/i
   );
   if (jot) return `add ${jot[1]}`;
+
+  // Slang: "dump/chuck/slap X on my plate/backlog"
+  const slangDump = text.match(
+    /^(?:yo[,!]?\s+)?(?:dump|chuck|slap|throw)\s+(.+?)\s+(?:on|onto|to)\s+(?:my\s+)?(?:plate|backlog|list|todo|tasks?)(?:\s+for\s+(.+))?$/i
+  );
+  if (slangDump) {
+    const title = slangDump[1].replace(/^['"]|['"]$/g, "").trim();
+    return slangDump[2] ? `add ${title} for ${slangDump[2]}` : `add ${title}`;
+  }
+
+  // "book the dentist" / "book a haircut friday"
+  const book = text.match(/^(?:book|block)\s+(?:time\s+)?(?:for\s+|a\s+|an\s+|the\s+)?(.+)$/i);
+  if (book && !/^(?:day|week|month)\b/i.test(book[1])) {
+    return `add ${book[1]}`;
+  }
 
   // "keep track of …" / "track …"
   const track = text.match(/^(?:keep track of|track|remember that)\s+(.+)$/i);
@@ -116,22 +131,26 @@ function softComplete(text: string): string | null {
 }
 
 function softQuery(text: string): string | null {
+  // Strip casual hedges before matching ("idk what's on my plate")
+  const q = text.replace(/^(?:idk|ngl|tbh|imo|fyi|uh+|um+)\s+/i, "").trim();
+
   // "what's left" / "what's pending" / "what do i still need to do"
   if (
     /^(?:what(?:'s| is|s)?\s+)?(?:left|pending|remaining|open|outstanding)(?:\s+(?:for\s+)?(?:today|tomorrow|this week))?/i.test(
-      text
+      q
     ) ||
-    /what do i still (?:need|have) to (?:do|finish)/i.test(text) ||
-    /catch me up|bring me up to speed|status(?:\s+update)?|overview|sitrep/i.test(text) ||
-    /what(?:'s| is|s)? on my (?:plate|agenda|schedule)/i.test(text) ||
-    /fill me in|update me|where do i stand/i.test(text)
+    /what do i still (?:need|have) to (?:do|finish)/i.test(q) ||
+    /catch me up|bring me up to speed|status(?:\s+update)?|overview|sitrep/i.test(q) ||
+    /what(?:'s| is|s)? on my (?:plate|agenda|schedule)/i.test(q) ||
+    /^(?:what(?:'s| is|s)?\s+)?(?:left\s+)?on my plate\b/i.test(q) ||
+    /fill me in|update me|where do i stand/i.test(q)
   ) {
-    if (/\btomorrow\b/i.test(text)) return "show my tasks for tomorrow";
-    if (/\bthis week\b/i.test(text)) return "show my tasks for this week";
-    if (/\bnext week\b/i.test(text)) return "show my tasks for next week";
-    if (/\bthis month\b/i.test(text)) return "show my tasks for this month";
-    if (/\bnext month\b/i.test(text)) return "show my tasks for next month";
-    if (/\boverdue\b/i.test(text)) return "show my overdue tasks";
+    if (/\btomorrow\b/i.test(q)) return "show my tasks for tomorrow";
+    if (/\bthis week\b/i.test(q)) return "show my tasks for this week";
+    if (/\bnext week\b/i.test(q)) return "show my tasks for next week";
+    if (/\bthis month\b/i.test(q)) return "show my tasks for this month";
+    if (/\bnext month\b/i.test(q)) return "show my tasks for next month";
+    if (/\boverdue\b/i.test(q)) return "show my overdue tasks";
     return "show my tasks for today";
   }
 
@@ -290,10 +309,15 @@ export function understandInput(raw: string): Understood {
   }
 
   if (stance.kind === "suggestion") {
+    const advice =
+      /^(?:should i|shall i|do you think i should|would it|is it (?:a )?good idea)/i.test(
+        text
+      );
     return {
       kind: "reply",
-      message:
-        "Sounds like you're still deciding. Want me to save that as a task, or leave it for now?",
+      message: advice
+        ? "I can share what is already on your list, but I will not add or change anything from an advice question. Tell me explicitly if you want a task saved."
+        : "Sounds like you're still deciding. Want me to save that as a task, or leave it for now?",
     };
   }
 

@@ -47,4 +47,9 @@ describe("date periods", () => {
     const resolved = resolveDatePhrase("next Monday", zone, 1, now);
     expect(resolved).toMatchObject({ type: "day", date: "2026-10-26" });
   });
+
+  it("resolves weekday abbreviations like sat", () => {
+    const resolved = resolveDatePhrase("sat", zone, 1, now);
+    expect(resolved).toMatchObject({ type: "day", date: "2026-10-24" });
+  });
 });

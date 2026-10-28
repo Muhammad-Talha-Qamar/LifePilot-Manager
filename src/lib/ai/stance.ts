@@ -106,6 +106,23 @@ export function detectStance(raw: string): Stance {
     }
   }
 
+  // Advice / deliberation questions must not invent writes.
+  // "Should I add more tasks today?" / "Do you think I should delete milk?"
+  if (
+    /^(?:should i|shall i|do you think i should|would it (?:be )?(?:good|wise|better) (?:to|if i)|is it (?:a )?good idea to|ought i)\b/i.test(
+      normalized
+    ) ||
+    /^(?:should|shall)\s+i\s+(?:add|create|put|delete|remove|complete|finish|move|schedule)\b/i.test(
+      normalized
+    )
+  ) {
+    return {
+      kind: "suggestion",
+      reason: "advice / deliberation question — not an instruction to write",
+      confidence: 0.93,
+    };
+  }
+
   // Past lookup: "Did I add milk?" / "Have I already put …"
   if (
     /^(?:did i|have i|did we|was there|is .+ on my (?:list|tasks?))\b/i.test(normalized) ||
@@ -127,9 +144,9 @@ export function detectStance(raw: string): Stance {
     /^(?:who are you|what are you|your name|help(?: me)?|what can you do)\b/i.test(normalized) ||
     /^(?:cool|nice|great|awesome|perfect|got it|makes sense|lol|haha|hmm+)\b/i.test(normalized)
   ) {
-    // "help me plan …" / "hey remind me …" are commands, not small talk.
+    // "help me plan …" / "hey remind me …" / "yo dump laundry …" are commands.
     if (
-      !/\b(?:remind|add|create|delete|complete|finish|schedule|move|show|list|plan|mark|undo|checklist|todo)\b/i.test(
+      !/\b(?:remind|add|create|delete|complete|finish|schedule|move|show|list|plan|mark|undo|checklist|todo|dump|chuck|slap|pencil|jot|book|push|bump|postpone)\b/i.test(
         normalized
       )
     ) {

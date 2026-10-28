@@ -26,7 +26,7 @@ function stripTrailingPunct(text: string): string {
 function stripPolite(text: string): string {
   return text
     .replace(
-      /^(?:hey|hi|hello|yo|ok|okay|so|um+|uh+|well|alright|right)[,!]?\s+/i,
+      /^(?:hey|hi|hello|yo|ok|okay|so|um+|uh+|well|alright|right|ngl|tbh|idk|imo|fyi)[,!]?\s+/i,
       ""
     )
     .replace(
@@ -35,6 +35,10 @@ function stripPolite(text: string): string {
     )
     .replace(
       /^(?:i(?:'d| would) like you to|i want you to|i need you to|help me(?: to)?)\s+/i,
+      ""
+    )
+    .replace(
+      /^(?:i(?:'d| would) appreciate(?: it)? if you could|i(?:'d| would) appreciate if you(?: could)?)\s+/i,
       ""
     )
     .replace(/^(?:i(?:'d| would) like to)\s+/i, "")
@@ -92,13 +96,27 @@ function rewriteCreates(text: string): string {
     return putDown[2] ? `add ${title} for ${putDown[2]}` : `add ${title}`;
   }
 
-  // "put X on my list/todo" / "add X to my list"
+  // "put X on my list/todo" / "add X to my list" / slang dump|chuck|slap onto backlog/plate
   const putOnList = text.match(
-    /^(?:put|add|stick|throw|drop|shove)\s+(.+?)\s+(?:on|to|onto|in)\s+(?:my\s+)?(?:list|todo|to-?do|tasks?|reminders?|workload|schedule|agenda)(?:\s+for\s+(.+))?$/i
+    /^(?:put|add|stick|throw|drop|shove|dump|chuck|slap)\s+(.+?)\s+(?:on|to|onto|in)\s+(?:my\s+)?(?:list|todo|to-?do|tasks?|reminders?|workload|schedule|agenda|backlog|plate)(?:\s+for\s+(.+))?$/i
   );
   if (putOnList) {
-    const title = tidyCreatePayload(putOnList[1]);
+    const title = tidyCreatePayload(putOnList[1]).replace(/^['"]|['"]$/g, "");
     return putOnList[2] ? `add ${title} for ${putOnList[2]}` : `add ${title}`;
+  }
+
+  // "jot down X" / "pencil in X" / "chuck a reminder for X onto friday"
+  const jotDown = text.match(
+    /^(?:jot(?:\s+down)?|pencil(?:\s+in)?|note(?:\s+down)?)\s+(.+)$/i
+  );
+  if (jotDown) return `add ${tidyCreatePayload(jotDown[1])}`;
+
+  const chuckReminder = text.match(
+    /^(?:chuck|dump|slap|throw)\s+(?:a\s+)?(?:reminder|note|task)?\s*(?:for|to)?\s*(.+?)(?:\s+(?:onto|on|to|for)\s+(.+))?$/i
+  );
+  if (chuckReminder) {
+    const title = tidyCreatePayload(chuckReminder[1]);
+    return chuckReminder[2] ? `add ${title} for ${chuckReminder[2]}` : `add ${title}`;
   }
 
   // "put homework on tomorrow's list" / "put X on Friday list"
@@ -138,9 +156,9 @@ function rewriteCreates(text: string): string {
     return scheduleThing[2] ? `add ${title} for ${scheduleThing[2]}` : `add ${title}`;
   }
 
-  // "book time for …" / "block time for …"
+  // "book time for …" / "block time for …" / "book the dentist"
   const book = text.match(/^(?:book|block)\s+(?:time\s+)?(?:for\s+)?(.+)$/i);
-  if (book && !/\b(?:day|week|month)\b/i.test(book[1])) {
+  if (book && !/^(?:day|week|month)\b/i.test(book[1])) {
     return `add ${tidyCreatePayload(book[1])}`;
   }
 
@@ -188,19 +206,32 @@ function rewriteCompletes(text: string): string {
   const allDone = text.match(/^all\s+done(?:\s+with)?\s+(.+)$/i);
   if (allDone) return `mark ${allDone[1]} complete`;
 
-  // "X done" / "X finished" (short trailing)
+  // "X done" / "X finished" (short trailing) — avoid "science as done" → "mark science as"
   const trailingDone = text.match(
     /^(.+?)\s+(?:done|finished|complete|completed)(?:\s+now)?$/i
   );
   if (
     trailingDone &&
     trailingDone[1].split(/\s+/).length <= 6 &&
+    !/\bas$/i.test(trailingDone[1].trim()) &&
     !/^(?:add|create|make|what|show|list|plan|how|mark|set|i|we|they)\b/i.test(
       trailingDone[1]
     ) &&
     !/\b(?:is|are|was|were|be)\b/i.test(trailingDone[1])
   ) {
     return `mark ${trailingDone[1]} complete`;
+  }
+
+  // "X as done" / "X as complete"
+  const asDone = text.match(
+    /^(.+?)\s+as\s+(?:done|complete|completed|finished)$/i
+  );
+  if (
+    asDone &&
+    asDone[1].split(/\s+/).length <= 6 &&
+    !/^(?:add|create|make|what|show|list|plan|how|mark|set)\b/i.test(asDone[1])
+  ) {
+    return `mark ${asDone[1]} complete`;
   }
 
   return text;
@@ -341,8 +372,14 @@ function rewriteQueries(text: string): string {
     return "show my checklists";
   }
 
-  // "what's on my plate"
-  if (/what(?:'s| is|s)? on my plate/i.test(text)) {
+  // "what's on my plate" / "whats on my plate tomorrow"
+  if (
+    /what(?:'s| is|s)? on my plate/i.test(text) ||
+    /^(?:what(?:'s| is|s)?\s+)?(?:left\s+)?on my plate\b/i.test(text)
+  ) {
+    if (/\btomorrow\b/i.test(text)) return "show my tasks for tomorrow";
+    if (/\btoday\b|\btonight\b/i.test(text)) return "show my tasks for today";
+    if (/\bthis week\b/i.test(text)) return "show my tasks for this week";
     return "show my tasks for today";
   }
 

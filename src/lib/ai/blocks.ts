@@ -93,32 +93,39 @@ export function scheduleBlocks(
   projects: Project[]
 ): AssistantBlock[] {
   const blocks: AssistantBlock[] = [];
-  if (result.tasks.length || result.period.kind !== "overdue") {
+  const tasks = result.tasks ?? [];
+  const overdue = result.overdue_tasks ?? [];
+  const events = result.events ?? [];
+  const scheduleProjects = result.projects ?? [];
+  const periodKind = result.period?.kind ?? "today";
+  const periodLabel = result.period?.label ?? "Schedule";
+  const timezone = result.timezone ?? "UTC";
+  if (tasks.length || periodKind !== "overdue") {
     blocks.push({
       type: "tasks",
-      title: result.period.kind === "overdue" ? "Overdue tasks" : `Tasks · ${result.period.label}`,
-      tasks: result.tasks.map((task) => toTaskCard(task, projects, result.timezone)),
+      title: periodKind === "overdue" ? "Overdue tasks" : `Tasks · ${periodLabel}`,
+      tasks: tasks.map((task) => toTaskCard(task, projects, timezone)),
     });
   }
-  if (result.overdue_tasks.length) {
+  if (overdue.length) {
     blocks.push({
       type: "tasks",
       title: "Overdue",
-      tasks: result.overdue_tasks.map((task) => toTaskCard(task, projects, result.timezone)),
+      tasks: overdue.map((task) => toTaskCard(task, projects, timezone)),
     });
   }
-  if (result.events.length) {
+  if (events.length) {
     blocks.push({
       type: "events",
-      title: `Events · ${result.period.label}`,
-      events: result.events.map(toEventCard),
+      title: `Events · ${periodLabel}`,
+      events: events.map(toEventCard),
     });
   }
-  if (result.projects.length) {
+  if (scheduleProjects.length) {
     blocks.push({
       type: "projects",
-      title: `Project deadlines · ${result.period.label}`,
-      projects: result.projects.map((project) => toProjectCard(project, result.tasks, [])),
+      title: `Project deadlines · ${periodLabel}`,
+      projects: scheduleProjects.map((project) => toProjectCard(project, tasks, [])),
     });
   }
   return blocks;

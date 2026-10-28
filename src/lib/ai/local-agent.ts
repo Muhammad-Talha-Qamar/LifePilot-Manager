@@ -687,44 +687,50 @@ async function runQuery(
 
 function describeSchedule(result: ScheduleQueryResult, workload: boolean): string {
   const lines: string[] = [];
-  const taskWord = result.tasks.length === 1 ? "task" : "tasks";
-  const eventWord = result.events.length === 1 ? "event" : "events";
-  const overdueWord = result.overdue_tasks.length === 1 ? "task" : "tasks";
+  const tasks = result.tasks ?? [];
+  const events = result.events ?? [];
+  const overdue = result.overdue_tasks ?? [];
+  const projects = result.projects ?? [];
+  const taskWord = tasks.length === 1 ? "task" : "tasks";
+  const eventWord = events.length === 1 ? "event" : "events";
+  const overdueWord = overdue.length === 1 ? "task" : "tasks";
+  const estimated = result.estimated_minutes ?? tasks.length * 30;
+  const periodLabel = result.period?.label ?? "That period";
   if (workload) {
     lines.push(
-      `This week you have ${result.tasks.length} open ${taskWord} (about ${result.estimated_minutes} minutes), ${result.events.length} ${eventWord}, and ${result.overdue_tasks.length} overdue ${overdueWord} from earlier.`
+      `This week you have ${tasks.length} open ${taskWord} (about ${estimated} minutes), ${events.length} ${eventWord}, and ${overdue.length} overdue ${overdueWord} from earlier.`
     );
   } else {
     lines.push(
-      result.tasks.length === 0
-        ? `${result.period.label}: nothing open on your list for this period.`
-        : `${result.period.label}: ${result.tasks.length} open ${taskWord}.`
+      tasks.length === 0
+        ? `${periodLabel}: nothing open on your list for this period.`
+        : `${periodLabel}: ${tasks.length} open ${taskWord}.`
     );
   }
-  if (result.tasks.length === 0) {
+  if (tasks.length === 0) {
     lines.push(
-      result.period.kind === "no_deadline"
+      result.period?.kind === "no_deadline"
         ? "Every open task already has a deadline."
         : "Nothing open falls in that period. Tasks without a deadline are left out of this list."
     );
   } else {
-    for (const task of result.tasks) {
-      const project = result.projects.find((item) => item.id === task.project_id);
+    for (const task of tasks) {
+      const project = projects.find((item) => item.id === task.project_id);
       lines.push(
         `• ${task.title} — ${task.priority} priority, ${task.status === "done" ? "done" : "not done yet"}, due ${task.due_date ? formatDateOnly(task.due_date) : "no deadline"}${task.due_time ? ` at ${task.due_time.slice(0, 5)}` : ""}${project ? `, in ${project.name}` : ""}`
       );
     }
   }
-  if (result.overdue_tasks.length) {
+  if (overdue.length) {
     lines.push("Still overdue from earlier (listed separately):");
-    for (const task of result.overdue_tasks) {
+    for (const task of overdue) {
       lines.push(`• ${task.title} — due ${formatDateOnly(task.due_date)}, ${task.priority}`);
     }
   }
-  if (result.events.length) {
+  if (events.length) {
     lines.push("Events:");
-    for (const event of result.events) lines.push(`• ${event.title} (${event.event_type})`);
-  } else if (result.period.kind === "today" || result.period.kind === "tomorrow") {
+    for (const event of events) lines.push(`• ${event.title} (${event.event_type})`);
+  } else if (result.period?.kind === "today" || result.period?.kind === "tomorrow") {
     lines.push("No events in that period.");
   }
   if (result.completed_omitted) {
@@ -733,8 +739,8 @@ function describeSchedule(result: ScheduleQueryResult, workload: boolean): strin
       `${result.completed_omitted} finished ${doneWord} from this period are not shown as still open.`
     );
   }
-  if (!workload && result.period.kind !== "overdue" && result.period.kind !== "no_deadline" && result.tasks.length > 0) {
-    lines.push(`About ${result.estimated_minutes} minutes for the open tasks.`);
+  if (!workload && result.period?.kind !== "overdue" && result.period?.kind !== "no_deadline" && tasks.length > 0) {
+    lines.push(`About ${estimated} minutes for the open tasks.`);
   }
   return lines.join("\n");
 }
@@ -1335,9 +1341,13 @@ export async function runLocalCommand(
     return createProjectCommand(workingRaw, norm, context, board, act);
   }
 
+  // Only treat as calendar events when the event noun is the primary object
+  // ("schedule a meeting…", "add appointment with…"). Titles that merely
+  // mention "appointment" ("add vaccine appointment") stay as tasks.
   if (
-    /\b(event|meeting|appointment|exam)\b/.test(norm) &&
-    /^(?:add|create|make|schedule)\b/.test(norm) &&
+    /^(?:add|create|make|schedule)\s+(?:a\s+|an\s+|my\s+)?(?:event|meeting|appointment|exam)\b/.test(
+      norm
+    ) &&
     !/\bproject\b/.test(norm) &&
     !/\bchecklist\b/.test(norm)
   ) {
@@ -2122,15 +2132,23 @@ async function correctFocused(
     };
   }
 
+  // "friday instead" / "make it Friday instead" → date, not a new title.
+  const cleanedPhrase = phrase.replace(/\s+instead$/i, "").trim();
+
   // Priority corrections: "i meant urgent"
-  if (/^(?:more\s+)?(?:urgent|high priority|high|medium|low priority|low)$/i.test(phrase.trim())) {
+  if (/^(?:more\s+)?(?:urgent|high priority|high|medium|low priority|low)$/i.test(cleanedPhrase)) {
     if (focus.kind !== "task") {
       return { message: "I can only set priority on a task right now.", blocks: [], context };
     }
-    return setTaskPriority("it", phrase.trim(), context, board, act);
+    return setTaskPriority("it", cleanedPhrase, context, board, act);
   }
 
-  const resolved = resolveDatePhrase(phrase, board.timezone, board.weekStartsOn, board.now);
+  const resolved = resolveDatePhrase(
+    cleanedPhrase,
+    board.timezone,
+    board.weekStartsOn,
+    board.now
+  );
   if (resolved?.type === "ambiguous") {
     const soon = resolved.options[0];
     const later = resolved.options[1];
@@ -2192,7 +2210,25 @@ async function correctFocused(
   if (focus.kind === "task") {
     const verified = verifyTaskId(focus.id, board);
     if (!verified.ok) return { message: verified.reason, blocks: [], context };
-    const title = cleanPhrase(raw.match(/meant\s+(.+)$/i)?.[1] ?? phrase);
+    const title = cleanPhrase(raw.match(/meant\s+(.+)$/i)?.[1] ?? cleanedPhrase);
+    // Refuse renaming to a bare weekday/date word — ask instead of corrupting the title.
+    if (
+      /^(?:today|tonight|tomorrow|yesterday|monday|tuesday|wednesday|thursday|friday|saturday|sunday)$/i.test(
+        title
+      )
+    ) {
+      return {
+        message: `Did you want to move “${verified.task.title}” to ${title}, or rename it? Say “move it to ${title}” or give the new title.`,
+        blocks: [
+          {
+            type: "tasks",
+            title: "Focused task",
+            tasks: [toTaskCard(verified.task, board.projects, board.timezone)],
+          },
+        ],
+        context,
+      };
+    }
     const result = await act("update_task", { id: verified.task.id, title });
     const task = taskFrom(result.result);
     if (!result.success || !task) return { message: failed("rename that task", result.error), blocks: [], context };
@@ -3223,7 +3259,19 @@ async function createTaskCommand(
   }
   let due: string | null = null;
   if (when) {
-    const resolved = resolveDatePhrase(when, board.timezone, board.weekStartsOn, board.now);
+    // Multi-intent leftovers: "tomorrow and mark milk done" → keep only the date head.
+    const whenHead = when
+      .replace(
+        /\s+and\s+(?:mark|complete|finish|delete|remove|move|add|create)\b[\s\S]*$/i,
+        ""
+      )
+      .trim();
+    const resolved = resolveDatePhrase(
+      whenHead || when,
+      board.timezone,
+      board.weekStartsOn,
+      board.now
+    );
     if (resolved?.type === "ambiguous") {
       context.pendingClarification = {
         question: resolved.question,
@@ -3232,14 +3280,24 @@ async function createTaskCommand(
       };
       return { message: resolved.question, blocks: [], context };
     }
-    if (!resolved || resolved.type !== "day") {
+    if (resolved?.type === "day") {
+      due = resolved.date;
+    } else if (resolved?.type === "range" && resolved.to) {
+      // "by next month/week" → use the end of the period as a concrete due day.
+      due = resolved.to;
+    } else if (!resolved) {
+      return {
+        message: "That due date needs a specific day before I create the task. I did not save one.",
+        blocks: [],
+        context,
+      };
+    } else {
       return {
         message: "That due date needs a specific day before I create the task. I did not save one.",
         blocks: [],
         context,
       };
     }
-    due = resolved.date;
   }
   const duplicate = board.tasks.find(
     (task) =>

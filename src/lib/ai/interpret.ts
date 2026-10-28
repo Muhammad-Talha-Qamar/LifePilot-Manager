@@ -90,7 +90,9 @@ export function primaryClause(raw: string): string {
   if (!cleaned) return cleaned;
 
   const parts = cleaned
-    .split(/(?<=[.!?])\s+|\s+(?:and then|then)\s+/i)
+    .split(
+      /(?<=[.!?])\s+|\s+(?:and then|then)\s+|\s+and\s+(?=(?:mark|complete|finish|delete|remove|move|reschedule|add|create|show)\b)/i
+    )
     .map((p) => p.replace(/[.!?]+$/g, "").trim())
     .filter((p) => p.length > 1);
   if (parts.length <= 1) return cleaned;

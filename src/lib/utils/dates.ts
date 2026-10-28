@@ -298,7 +298,15 @@ export function resolveDatePhrase(
     .toLowerCase()
     .replace(/[?.!,]/g, " ")
     .replace(/\s+/g, " ")
-    .replace(/\b(tommorow|tommorrow|tomorow|tmrw|tmr)\b/g, "tomorrow")
+    .replace(/\b(tommorow|tommorrow|tomorow|tmrw|tmrrw|tmr)\b/g, "tomorrow")
+    // Common weekday abbreviations people type in chat
+    .replace(/\b(mon|monday)\b/g, "monday")
+    .replace(/\b(tue|tues|tuesday)\b/g, "tuesday")
+    .replace(/\b(wed|weds|wednesday)\b/g, "wednesday")
+    .replace(/\b(thu|thur|thurs|thursday)\b/g, "thursday")
+    .replace(/\b(fri|friday)\b/g, "friday")
+    .replace(/\b(sat|saturday)\b/g, "saturday")
+    .replace(/\b(sun|sunday)\b/g, "sunday")
     .trim();
   if (!normalized) return null;
 
