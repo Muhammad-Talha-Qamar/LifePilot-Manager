@@ -18,6 +18,9 @@ const eslintConfig = [
       "out/**",
       "build/**",
       "next-env.d.ts",
+      // Vitest files are checked by `npm test`, not production Next builds.
+      "src/**/*.test.ts",
+      "src/**/*.test.tsx",
     ],
   },
 ];

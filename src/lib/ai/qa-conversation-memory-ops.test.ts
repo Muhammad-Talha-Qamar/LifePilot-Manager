@@ -88,7 +88,7 @@ describe("QA conversation — multi-turn without unintended duplicates", () => {
       authA
     );
     const task = created.result as { id: string; title: string; due_date: string };
-    let context = emptyContext();
+    const context = emptyContext();
     context.focus = {
       kind: "task",
       id: task.id,
